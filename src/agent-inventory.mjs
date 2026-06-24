@@ -1,6 +1,6 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
 import { readString, requireRecord } from "./config-helpers.mjs";
 
@@ -318,7 +318,7 @@ async function topLevelPluginManifests(root) {
     const pluginRoot = dirname(dirname(manifest));
     return !manifests.some((candidate) => {
       const candidateRoot = dirname(dirname(candidate));
-      return candidateRoot !== pluginRoot && pluginRoot.startsWith(`${candidateRoot}/`);
+      return candidateRoot !== pluginRoot && isPathInside(pluginRoot, candidateRoot);
     });
   }).sort((left, right) => left.localeCompare(right));
 }
@@ -791,13 +791,19 @@ function resolvePath(path, home) {
 function displayPath(path, home) {
   const resolvedHome = resolve(home);
   const resolvedPath = resolve(path);
-  if (resolvedPath === resolvedHome) {
+  const rel = relative(resolvedHome, resolvedPath);
+  if (rel === "") {
     return "~";
   }
-  if (resolvedPath.startsWith(`${resolvedHome}/`)) {
-    return `~/${relative(resolvedHome, resolvedPath).replaceAll("\\", "/")}`;
+  if (!rel.startsWith("..") && !isAbsolute(rel)) {
+    return `~/${rel.replaceAll("\\", "/")}`;
   }
   return resolvedPath;
+}
+
+function isPathInside(child, parent) {
+  const rel = relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function readCsv(value) {

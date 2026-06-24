@@ -177,7 +177,7 @@ test("agent inventory isolates detector and skill parse failures as warnings", a
     });
 
     assert.deepEqual(parsedInventory.skills.map((skill) => skill.id), ["good"]);
-    assert.match(parsedInventory.warnings.join("\n"), /bad\/SKILL\.md skipped/);
+    assert.match(parsedInventory.warnings.join("\n"), /bad[\\/]SKILL\.md skipped/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

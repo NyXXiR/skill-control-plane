@@ -23,6 +23,12 @@ test("package manifest is publishable as the SkillBoard CLI", async () => {
 });
 
 test("source-tree SkillBoard CLI entrypoint is executable for generated hooks", async () => {
+  if (process.platform === "win32") {
+    const bin = await readFile(resolve("bin/skillboard.mjs"), "utf8");
+    assert.match(bin, /^#!\/usr\/bin\/env node/);
+    return;
+  }
+
   const stats = await stat(resolve("bin/skillboard.mjs"));
 
   assert.equal(stats.mode & 0o111, 0o111);
@@ -39,8 +45,9 @@ test("package manifest includes the rollout operator runbook", async () => {
 });
 
 test("npm pack dry-run includes public runtime files and excludes work artifacts", async () => {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const result = await execFileAsync(npm, ["pack", "--dry-run", "--json"]);
+  const result = process.env.npm_execpath === undefined
+    ? await execFileAsync(process.platform === "win32" ? "npm.cmd" : "npm", ["pack", "--dry-run", "--json"], { shell: process.platform === "win32" })
+    : await execFileAsync(process.execPath, [process.env.npm_execpath, "pack", "--dry-run", "--json"]);
   const [pack] = JSON.parse(result.stdout);
   const paths = pack.files.map((file) => file.path);
 

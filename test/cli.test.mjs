@@ -8,6 +8,17 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+async function execHookScript(path, args) {
+  if (process.platform === "win32") {
+    return await execFileAsync("bash", [path, ...args]);
+  }
+  return await execFileAsync(path, args);
+}
+
+function isPosixExecutableBitSupported() {
+  return process.platform !== "win32";
+}
+
 test("cli check and dashboard handle the multi-source example", async () => {
   const baseArgs = ["--config", "examples/multi-source.config.yaml", "--skills", "examples/multi-source-skills"];
   const check = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "check", ...baseArgs]);
@@ -78,7 +89,7 @@ test("cli multi-source example is runnable from the project root without local p
       "--skillboard-bin",
       "node bin/skillboard.mjs"
     ]);
-    const hook = await execFileAsync(hookPath, ["matt.tdd"]);
+    const hook = await execHookScript(hookPath, ["matt.tdd"]);
     const auditPayload = JSON.parse(audit.stdout);
     const lockText = await readFile(lockPath, "utf8");
 
@@ -1245,7 +1256,7 @@ test("cli inventory refresh rescans installed skills and supports dry-run", asyn
     assert.deepEqual(dryRunPayload.scan.addedSkills, ["local-helper"]);
     assert.deepEqual(dryRunPayload.scan.addedWorkflows, ["codex-local-manual"]);
     assert.deepEqual(dryRunPayload.scan.addedHarnesses, ["codex"]);
-    assert.match(dryRunPayload.scan.warnings.join("\n"), /broken-helper\/SKILL\.md skipped/);
+    assert.match(dryRunPayload.scan.warnings.join("\n"), /broken-helper[\\/]SKILL\.md skipped/);
     assert.equal(afterDryRun, before);
 
     const refresh = await execFileAsync(process.execPath, [
@@ -1262,7 +1273,7 @@ test("cli inventory refresh rescans installed skills and supports dry-run", asyn
     assert.match(refresh.stdout, /Added skills: `local-helper`/);
     assert.match(refresh.stdout, /Added workflows: `codex-local-manual`/);
     assert.match(refresh.stdout, /Added harnesses: `codex`/);
-    assert.match(refresh.stdout, /Scan warnings: `.*broken-helper\/SKILL\.md skipped/);
+    assert.match(refresh.stdout, /Scan warnings: `.*broken-helper[\\/]SKILL\.md skipped/);
     assert.match(config, /local-helper:/);
     assert.match(config, /status: active-manual/);
     assert.match(config, /invocation: manual-only/);
@@ -1597,11 +1608,13 @@ test("cli hook install emits an executable guard script", async () => {
     ]);
     const script = await readFile(hookPath, "utf8");
     const mode = (await stat(hookPath)).mode;
-    const guard = await execFileAsync(hookPath, ["private.tdd-work-continuity"]);
+    const guard = await execHookScript(hookPath, ["private.tdd-work-continuity"]);
 
     assert.match(install.stdout, /Installed guard hook/);
     assert.match(script, /guard use/);
-    assert.equal((mode & 0o111) !== 0, true);
+    if (isPosixExecutableBitSupported()) {
+      assert.equal((mode & 0o111) !== 0, true);
+    }
     assert.equal(guard.stdout, "allow\n");
 
     const commandHook = join(root, "codex-night-guard-node.sh");
@@ -1620,7 +1633,7 @@ test("cli hook install emits an executable guard script", async () => {
       "--skillboard-bin",
       `${process.execPath} ${join(process.cwd(), "bin", "skillboard.mjs")}`
     ]);
-    const commandGuard = await execFileAsync(commandHook, ["matt.tdd"]);
+    const commandGuard = await execHookScript(commandHook, ["matt.tdd"]);
 
     assert.equal(commandGuard.stdout, "allow\n");
   } finally {
@@ -1682,7 +1695,7 @@ harnesses:
 
     assert.equal(error.code, 1);
     assert.match(error.stderr, /Refusing to overwrite existing hook path/);
-    assert.match(installed.stdout, /\.skillboard\/hooks\/skillboard-guard-bad-workflow\.sh/);
+    assert.match(installed.stdout, /\.skillboard[\\/]hooks[\\/]skillboard-guard-bad-workflow\.sh/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
