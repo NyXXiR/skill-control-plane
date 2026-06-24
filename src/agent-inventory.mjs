@@ -53,8 +53,8 @@ export const agentInventoryDetectors = Object.freeze([
 ]);
 
 export async function discoverAgentSkillInventory(options = {}) {
-  const home = options.home ?? homedir();
   const env = options.env ?? process.env;
+  const home = options.home ?? env.HOME ?? env.USERPROFILE ?? homedir();
   const detectors = options.detectors ?? agentInventoryDetectors;
   const roots = uniquePaths([
     ...defaultScanRoots(home, env),

@@ -136,6 +136,29 @@ test("agent inventory accepts injected detector registry entries", async () => {
   }
 });
 
+test("agent inventory uses HOME env when rendering discovered paths", async () => {
+  const { mkdir, mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { discoverAgentSkillInventory } = await import("../src/index.mjs");
+  const root = await mkdtemp(join(tmpdir(), "skillboard-inventory-home-env-test-"));
+  try {
+    const home = join(root, "home");
+    const skillsRoot = join(home, ".codex", "skills");
+    await mkdir(join(skillsRoot, "bad"), { recursive: true });
+    await writeFile(join(skillsRoot, "bad", "SKILL.md"), "# missing frontmatter\n", "utf8");
+
+    const inventory = await discoverAgentSkillInventory({
+      env: { HOME: home, CODEX_HOME: join(home, ".codex"), SKILLBOARD_INIT_SCAN_ROOTS: "" },
+      roots: [skillsRoot]
+    });
+
+    assert.match(inventory.warnings.join("\n"), /~\/\.codex\/skills\/bad\/SKILL\.md skipped/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("agent inventory isolates detector and skill parse failures as warnings", async () => {
   const { mkdir, mkdtemp, rm, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
