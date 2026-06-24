@@ -14,6 +14,38 @@ choose the active pool, invocation modes make automatic use explicit, and the
 reconciler turns skill or harness drift into safe defaults plus a short list of
 decisions that actually need user approval.
 
+## What You Get In 30 Seconds
+
+- See which skills are installed vs active.
+- Block automatic invocation by default.
+- Attach skills to specific workflows.
+- Generate impact reports before disabling a skill.
+
+## Demo
+
+```bash
+skillboard init
+skillboard doctor
+skillboard list skills --workflow codex-night-workflow
+skillboard can-use matt.tdd --workflow codex-night-workflow
+skillboard impact disable matt.tdd
+```
+
+Example dashboard output:
+
+```markdown
+## Skills
+
+- `private.tdd-work-continuity` — active, manual-only, local, owner: `user.local`
+- `matt.tdd` — active, workflow-auto, exported, owner: `github.mattpocock.skills`
+- `vendor.experimental-review` — quarantined, blocked, vendor, owner: `new.runtime.bundle`
+
+## Reconcile Plan
+
+- quarantine new skills until a workflow explicitly opts in
+- report workflows affected before a skill or harness is disabled
+```
+
 ## Why This Exists
 
 Agent skill tooling is moving fast. `skillshare` is good at syncing skills across
@@ -60,30 +92,33 @@ This repository is an early CLI-first foundation. It currently supports:
 
 ## Quick Start
 
-Install from npm after the package is published:
+Use it from a clone today:
+
+```bash
+git clone https://github.com/NyXXiR/skill-control-plane.git
+cd skill-control-plane
+npm install
+npm test
+npm link
+skillboard init
+skillboard doctor
+```
+
+After the npm package is published, install it globally:
 
 ```bash
 npm install -g agent-skillboard
-skillboard init
-skillboard doctor
+```
+
+Useful first commands:
+
+```bash
 skillboard inventory refresh --dry-run
 skillboard import --profile github.mattpocock.skills --source-root /path/to/mattpocock-skills
 skillboard import --profile github.mattpocock.skills --source-root /path/to/mattpocock-skills --config skillboard.config.yaml --merge --dry-run
 skillboard check --config skillboard.config.yaml --skills skills
 skillboard rollout audit --config skillboard.config.yaml --skills skills --json
 skillboard rollout plan --config skillboard.config.yaml --skills skills --json
-```
-
-Install from a clone:
-
-```bash
-git clone <your-skillboard-repo-url>
-cd skillboard
-npm install
-npm test
-npm link
-skillboard init
-skillboard doctor
 ```
 
 `skillboard init` creates `skillboard.config.yaml`, `skills/`,
