@@ -323,7 +323,7 @@ function emitCompactActionCommands(lines, action, brief) {
     lines.push(`  - blocked: ${safeText(action.application.blocked_reason)}`);
   }
   if (!emittedCommand && action.dry_run !== null) {
-    lines.push(`  - preview: ${code(action.dry_run.display)}`);
+    lines.push(`  - preview: ${code(action.dry_run.display, Number.POSITIVE_INFINITY)}`);
   }
   lines.push(`  - details: ${code(`skillboard brief --verbose${workflowOption(brief)}`)}`);
 }

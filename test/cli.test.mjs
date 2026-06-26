@@ -31,6 +31,16 @@ function isPosixExecutableBitSupported() {
   return process.platform !== "win32";
 }
 
+function assertInitNextCommand(stdout, command, dir, suffix = "") {
+  const prefix = `- node bin/skillboard.mjs ${command} --dir `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes(dir)
+      && candidate.endsWith(suffix);
+  });
+  assert.ok(line, `expected init Next command ${command} for ${dir}${suffix}\n${stdout}`);
+}
+
 test("cli check and dashboard handle the multi-source example", async () => {
   const baseArgs = ["--config", "examples/multi-source.config.yaml", "--skills", "examples/multi-source-skills"];
   const check = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "check", ...baseArgs]);
@@ -1145,8 +1155,8 @@ test("cli init scans installed local user skills into manual workflow state", as
     assert.match(init.stdout, /manual-only skills available/);
     assert.match(init.stdout, /blocked\/quarantined for safety/);
     assert.match(init.stdout, /Next:/);
-    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs doctor --dir ${project} --summary`));
-    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project}`));
+    assertInitNextCommand(init.stdout, "doctor", project, " --summary");
+    assertInitNextCommand(init.stdout, "brief", project);
     assert.match(config, /system-helper:/);
     assert.match(config, /local-helper:/);
     assert.match(config, /demo:review:/);

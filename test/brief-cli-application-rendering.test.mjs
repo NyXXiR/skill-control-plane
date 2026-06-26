@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { withBriefFixture } from "./helpers/advisor-brief-fixtures.mjs";
-import { runCli } from "./helpers/brief-cli.mjs";
+import { runCli, withInitializedEmptyProject } from "./helpers/brief-cli.mjs";
 
 test("brief command renders complete application commands for long paths", async () => {
   await withLongTmpdir(async () => {
@@ -42,9 +42,9 @@ test("brief command renders complete application commands for long paths", async
       assert.ok(applyActionLine, "expected an application apply action line");
       assert.doesNotMatch(applyActionLine, /\.\.\./);
       assert.match(applyActionLine, /apply action: `skillboard apply-action [^`]+`$/);
-      assert.ok(applyActionLine.includes(` --dir ${root}`));
-      assert.ok(applyActionLine.includes(` --config ${configPath}`));
-      assert.ok(applyActionLine.includes(` --skills ${skillsRoot}`));
+      assertCommandLineContainsArg(applyActionLine, "--dir", root);
+      assertCommandLineContainsArg(applyActionLine, "--config", configPath);
+      assertCommandLineContainsArg(applyActionLine, "--skills", skillsRoot);
       assert.ok(applyActionLine.includes(" --yes"));
       assert.ok(applyActionLine.includes(" --json"));
 
@@ -53,6 +53,24 @@ test("brief command renders complete application commands for long paths", async
         .find((line) => line.includes("underlying apply: `"));
       assert.ok(underlyingApplyLine, "expected raw underlying apply details");
       assert.match(underlyingApplyLine, /\.\.\./);
+    });
+  });
+});
+
+test("brief command keeps compact raw preview safety flags visible for long paths", async () => {
+  await withLongTmpdir(async () => {
+    await withInitializedEmptyProject(async ({ root }) => {
+      const result = await runCli(["brief", "--dir", root]);
+
+      assert.equal(result.code, 0);
+      const previewLine = result.stdout
+        .split("\n")
+        .find((line) => line.includes("preview: `skillboard inventory refresh"));
+
+      assert.ok(previewLine, "expected setup preview command");
+      assert.doesNotMatch(previewLine, /\.\.\./);
+      assertCommandLineContainsArg(previewLine, "--dir", root);
+      assert.match(previewLine, /--dry-run/);
     });
   });
 });
@@ -77,4 +95,13 @@ async function withLongTmpdir(run) {
     }
     await rm(parent, { recursive: true, force: true });
   }
+}
+
+function assertCommandLineContainsArg(line, flag, value) {
+  assert.match(line, new RegExp(`\\s${escapeRegExp(flag)}\\s+`));
+  assert.ok(line.includes(value), `expected ${flag} value ${value} in ${line}`);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -23,6 +23,16 @@ function testAgentEnv(home, overrides = {}) {
   };
 }
 
+function assertInitNextCommand(stdout, command, dir, suffix = "") {
+  const prefix = `- node bin/skillboard.mjs ${command} --dir `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes(dir)
+      && candidate.endsWith(suffix);
+  });
+  assert.ok(line, `expected init Next command ${command} for ${dir}${suffix}\n${stdout}`);
+}
+
 async function makeInitializedProject() {
   const root = await mkdtemp(join(tmpdir(), "skillboard-ux-test-"));
   await execFileAsync(process.execPath, [BIN, "init", "--dir", root, "--no-scan-installed"]);
@@ -137,9 +147,9 @@ test("init summarizes large installed skill scans instead of printing the whole 
     assert.match(init.stdout, /No automatic model invocation was enabled/);
     assert.match(init.stdout, /12 manual-only skills available/);
     assert.match(init.stdout, /Next:/);
-    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs doctor --dir ${project} --summary`));
-    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project}`));
-    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project} --verbose`));
+    assertInitNextCommand(init.stdout, "doctor", project, " --summary");
+    assertInitNextCommand(init.stdout, "brief", project);
+    assertInitNextCommand(init.stdout, "brief", project, " --verbose");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
