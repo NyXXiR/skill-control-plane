@@ -17,4 +17,4 @@ This directory contains durable plans that can be picked up by another agent
 ## Current Plans
 
 - `20260625-080025-skillboard-mvp-review.md` — SkillBoard MVP feature/domain
-  review and UX improvement plan (Status: pending)
+  review and UX improvement plan (Status: completed)

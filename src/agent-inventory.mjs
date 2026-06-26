@@ -2,6 +2,18 @@ import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
+import {
+  customUserUnit,
+  defaultScanRoots,
+  displayPath,
+  hermesProfileUnit,
+  isHermesProfileSkillsPath,
+  safeSegment,
+  systemCodexUnit,
+  userClaudeUnit,
+  userCodexUnit,
+  userHermesUnit
+} from "./agent-inventory-platforms.mjs";
 import { readString, requireRecord } from "./config-helpers.mjs";
 
 export const agentInventoryDetectors = Object.freeze([
@@ -42,6 +54,24 @@ export const agentInventoryDetectors = Object.freeze([
     }
   },
   {
+    id: "hermes-user-skills",
+    matches(path) {
+      return path.endsWith("/.hermes/skills") || path.endsWith("\\.hermes\\skills");
+    },
+    async discover(path, home) {
+      return await discoverSkillDirectory(path, userHermesUnit(path, home), { excludeSystem: true });
+    }
+  },
+  {
+    id: "hermes-profile-skills",
+    matches(path) {
+      return isHermesProfileSkillsPath(path);
+    },
+    async discover(path, home) {
+      return await discoverSkillDirectory(path, hermesProfileUnit(path, home), { excludeSystem: true });
+    }
+  },
+  {
     id: "custom-user-skill-root",
     matches() {
       return true;
@@ -57,7 +87,7 @@ export async function discoverAgentSkillInventory(options = {}) {
   const home = options.home ?? env.HOME ?? env.USERPROFILE ?? homedir();
   const detectors = options.detectors ?? agentInventoryDetectors;
   const roots = uniquePaths([
-    ...defaultScanRoots(home, env),
+    ...(await defaultScanRoots(home, env)),
     ...readCsv(env.SKILLBOARD_INIT_SCAN_ROOTS),
     ...(options.roots ?? [])
   ], home);
@@ -170,7 +200,7 @@ export function mergeAgentSkillInventory(configText, inventory) {
 function skillDefaultsFor(unit, options) {
   if (isTrustedLocalUserUnit(unit)) {
     return options.attachLocalWorkflow
-      ? { status: "active-manual", invocation: "manual-only", attachLocalWorkflow: true }
+      ? { status: "active", invocation: "manual-only", attachLocalWorkflow: true }
       : { status: "candidate", invocation: "manual-only", attachLocalWorkflow: false };
   }
   return { status: "quarantined", invocation: "blocked", attachLocalWorkflow: false };
@@ -186,6 +216,13 @@ function localWorkflowTarget(unit) {
   }
   if (unit?.id === "claude.user-skills") {
     return { harness: "claude", workflow: "claude-local-manual" };
+  }
+  if (unit?.id === "hermes.user-skills") {
+    return { harness: "hermes", workflow: "hermes-local-manual" };
+  }
+  if (unit?.id.startsWith("hermes.profile.") && unit.id.endsWith(".skills")) {
+    const profile = unit.id.slice("hermes.profile.".length, -".skills".length);
+    return { harness: "hermes", workflow: `hermes-${profile}-local-manual` };
   }
   const base = safeSegment(unit?.id ?? "local").replaceAll(".", "-");
   return { harness: "local", workflow: `${base}-local-manual` };
@@ -215,16 +252,6 @@ function ensureLocalWorkflow(workflowsMap, target, skills, document) {
     blocked_skills: []
   }));
   return true;
-}
-
-function defaultScanRoots(home, env) {
-  const codexHome = env.CODEX_HOME ?? join(home, ".codex");
-  return [
-    join(codexHome, "skills", ".system"),
-    join(codexHome, "skills"),
-    join(codexHome, "plugins", "cache"),
-    join(home, ".claude", "skills")
-  ];
 }
 
 async function discoverRoot(root, home, detectors) {
@@ -407,66 +434,6 @@ function installUnitWithSkills(unit, skills, root, home) {
     modifiedConfigFiles: unit.modifiedConfigFiles ?? [],
     permissionRisk: unit.permissionRisk ?? permissionRiskFor({ commands, hooks, mcpServers }),
     skills
-  };
-}
-
-function systemCodexUnit(path, home) {
-  return {
-    id: "codex.system-skills",
-    kind: "agent",
-    sourceClass: "runtime-extension",
-    priority: 55,
-    trustLevel: "reviewed",
-    source: displayPath(path, home),
-    scope: "user-global",
-    manifestPath: "",
-    cachePath: displayPath(path, home),
-    category: "agent-runtime"
-  };
-}
-
-function userCodexUnit(path, home) {
-  return {
-    id: "codex.user-skills",
-    kind: "skill",
-    sourceClass: undefined,
-    priority: 100,
-    trustLevel: "trusted",
-    source: displayPath(path, home),
-    scope: "user-global",
-    manifestPath: "",
-    cachePath: displayPath(path, home),
-    category: "user"
-  };
-}
-
-function userClaudeUnit(path, home) {
-  return {
-    id: "claude.user-skills",
-    kind: "skill",
-    sourceClass: undefined,
-    priority: 100,
-    trustLevel: "trusted",
-    source: displayPath(path, home),
-    scope: "user-global",
-    manifestPath: "",
-    cachePath: displayPath(path, home),
-    category: "user"
-  };
-}
-
-function customUserUnit(path, home) {
-  return {
-    id: `custom.${safeSegment(basename(path))}.skills`,
-    kind: "skill",
-    sourceClass: undefined,
-    priority: 100,
-    trustLevel: "trusted",
-    source: displayPath(path, home),
-    scope: "local",
-    manifestPath: "",
-    cachePath: displayPath(path, home),
-    category: "user"
   };
 }
 
@@ -781,11 +748,6 @@ function uniqueId(base, used) {
   return `${base}-${counter}`;
 }
 
-function safeSegment(value) {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "");
-  return normalized.length === 0 ? "skill" : normalized;
-}
-
 function validId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
 }
@@ -798,19 +760,6 @@ function resolvePath(path, home) {
     return join(home, path.slice(2));
   }
   return resolve(path);
-}
-
-function displayPath(path, home) {
-  const resolvedHome = resolve(home);
-  const resolvedPath = resolve(path);
-  const rel = relative(resolvedHome, resolvedPath);
-  if (rel === "") {
-    return "~";
-  }
-  if (!rel.startsWith("..") && !isAbsolute(rel)) {
-    return `~/${rel.replaceAll("\\", "/")}`;
-  }
-  return resolvedPath;
 }
 
 function isPathInside(child, parent) {

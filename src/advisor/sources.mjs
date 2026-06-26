@@ -1,3 +1,4 @@
+import { recommendTrustLevel } from "./trust-policy.mjs";
 import { sortById, sortedStrings, slug } from "./sort.mjs";
 
 export function emptySources() {
@@ -49,19 +50,22 @@ export function summarizeSources(sourceAudit) {
 
 export function buildReviewQueue(workspace, sourceAudit) {
   const entries = [];
+  const installUnitsById = new Map(workspace.installUnits.map((unit) => [unit.id, unit]));
   for (const unit of sourceAudit.units) {
     if (unit.enabled && unit.sourceClass !== "user" && unit.trustLevel === "unreviewed") {
+      const recommended = recommendTrustLevel(installUnitsById.get(unit.id) ?? unit);
       entries.push({
         kind: "install_unit",
         id: `install_unit:${unit.id}`,
         label: `Review ${unit.id}`,
-        reason: "Source is enabled but not reviewed.",
+        reason: `Source is enabled but not reviewed. Recommended trust level: ${recommended}.`,
         risk: normalizeRisk(unit.permissionRisk),
         action_ids: [],
         advanced: {
           install_unit: unit.id,
           source_class: unit.sourceClass,
-          trust_level: unit.trustLevel
+          trust_level: unit.trustLevel,
+          recommended_trust_level: recommended
         }
       });
     }

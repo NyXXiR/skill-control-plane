@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import YAML from "yaml";
 import { importSource, loadSourceProfile, renderImportFragment } from "../src/index.mjs";
 
 const execFileAsync = promisify(execFile);
+const SKILLBOARD_BIN = fileURLToPath(new URL("../bin/skillboard.mjs", import.meta.url));
 
 test("source profiles import skill repositories into install-unit governed skills", async () => {
   const root = await mkdtemp(join(tmpdir(), "skillboard-profile-test-"));
@@ -158,6 +160,95 @@ test("cli import can safely merge a profile into config", async () => {
     assert.match(mergedText, /# keep import comment/);
     assert.equal(merged.skills["matt.tdd"].owner_install_unit, "github.mattpocock.skills");
     assert.deepEqual(merged.install_units["github.mattpocock.skills"].components.skills, ["matt.tdd"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli import merge uses cwd skillboard.config.yaml by default", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-import-default-config-test-"));
+  try {
+    const sourceRoot = join(root, "source");
+    const configPath = join(root, "skillboard.config.yaml");
+    await writeSkill(join(sourceRoot, "skills", "tdd", "SKILL.md"), "tdd", "Run test-driven development.");
+    await writeFile(configPath, "version: 1\nskills: {}\ninstall_units: {}\n", "utf8");
+    const before = await readFile(configPath, "utf8");
+
+    const dryRun = await execFileAsync(process.execPath, [
+      SKILLBOARD_BIN,
+      "import",
+      "--profile",
+      "github.mattpocock.skills",
+      "--source-root",
+      sourceRoot,
+      "--merge",
+      "--dry-run",
+      "--json"
+    ], { cwd: root });
+    const payload = JSON.parse(dryRun.stdout);
+
+    assert.equal(payload.dryRun, true);
+    assert.equal(payload.changed, true);
+    assert.deepEqual(payload.addedSkills, ["matt.tdd"]);
+    assert.equal(await readFile(configPath, "utf8"), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli import merge validates the merged config before writing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-import-checked-write-test-"));
+  try {
+    const sourceRoot = join(root, "source");
+    const profilePath = join(root, "unsafe-profile.yaml");
+    const configPath = join(root, "skillboard.config.yaml");
+    await writeSkill(join(sourceRoot, "skills", "auto", "SKILL.md"), "auto", "Auto-select this skill.");
+    await writeFile(
+      profilePath,
+      `id: local.unsafe-auto
+source: /tmp/unsafe-auto
+kind: skill
+namespace: unsafe
+target_path_prefix: unsafe
+scope: project
+default_status: active
+default_invocation: workflow-auto
+default_exposure: unit-managed
+provided_components:
+  - skills
+skill_paths:
+  - skills/*/SKILL.md
+permission_risk: medium
+`,
+      "utf8"
+    );
+    await writeFile(
+      configPath,
+      `version: 1
+defaults:
+  require_explicit_workflow: true
+skills: {}
+install_units: {}
+`,
+      "utf8"
+    );
+    const before = await readFile(configPath, "utf8");
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        SKILLBOARD_BIN,
+        "import",
+        "--profile",
+        profilePath,
+        "--source-root",
+        sourceRoot,
+        "--config",
+        configPath,
+        "--merge"
+      ]),
+      /Policy update would create invalid config|workflow-auto/
+    );
+    assert.equal(await readFile(configPath, "utf8"), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

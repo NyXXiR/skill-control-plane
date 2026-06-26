@@ -153,3 +153,83 @@ test("policy rejects install-unit component ownership drift", async () => {
     assert.match(errors, /Skill matt\.grill-me is unit-managed but does not declare owner_install_unit/);
   });
 });
+
+test("policy rejects invalid status/invocation combinations", async () => {
+  await withFixture(async ({ configPath, skillsRoot }) => {
+    const workspace = await loadWorkspace({ configPath, skillsRoot });
+    workspace.skills.push({
+      id: "user.invalid-combo",
+      path: "user/invalid-combo",
+      status: "candidate",
+      invocation: "global-auto",
+      exposure: "exported",
+      category: "user",
+      canonicalFor: [],
+      conflictsWith: [],
+      replacedBy: undefined,
+      ownerInstallUnit: undefined
+    });
+    const result = checkPolicy(workspace);
+    const errors = result.errors.join("\n");
+
+    assert.equal(result.ok, false);
+    assert.match(errors, /candidate.*global-auto/);
+  });
+});
+
+test("policy warns on legacy status values", async () => {
+  await withFixture(async ({ configPath, skillsRoot }) => {
+    const workspace = await loadWorkspace({ configPath, skillsRoot });
+    workspace.skills.push({
+      id: "user.legacy",
+      path: "user/legacy",
+      status: "active-manual",
+      invocation: "manual-only",
+      exposure: "exported",
+      category: "user",
+      canonicalFor: [],
+      conflictsWith: [],
+      replacedBy: undefined,
+      ownerInstallUnit: undefined
+    });
+    const result = checkPolicy(workspace);
+
+    assert.equal(result.ok, true);
+    assert.match(result.warnings.join("\n"), /legacy status active-manual/);
+  });
+});
+
+test("policy accepts all canonical status/invocation pairs", async () => {
+  await withFixture(async ({ configPath, skillsRoot }) => {
+    const workspace = await loadWorkspace({ configPath, skillsRoot });
+    const validPairs = [
+      { status: "active", invocation: "manual-only" },
+      { status: "active", invocation: "workflow-auto" },
+      { status: "candidate", invocation: "router-only" },
+      { status: "canonical", invocation: "global-auto" },
+      { status: "vendor", invocation: "manual-only" },
+      { status: "blocked", invocation: "blocked" },
+      { status: "deprecated", invocation: "deprecated" }
+    ];
+    for (const pair of validPairs) {
+      workspace.skills.push({
+        id: `user.valid-${pair.status}-${pair.invocation}`,
+        path: "user/valid",
+        status: pair.status,
+        invocation: pair.invocation,
+        exposure: pair.status === "canonical" ? "global-meta" : "exported",
+        category: "user",
+        canonicalFor: [],
+        conflictsWith: [],
+        replacedBy: undefined,
+        ownerInstallUnit: undefined
+      });
+    }
+    const result = checkPolicy(workspace);
+
+    const matrixErrors = result.errors.filter((error) =>
+      /must use one of|unsupported status|cannot use invocation/.test(String(error))
+    );
+    assert.deepEqual(matrixErrors, []);
+  });
+});

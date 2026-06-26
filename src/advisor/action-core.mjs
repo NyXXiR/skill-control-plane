@@ -1,4 +1,9 @@
 const RISK_RANK = { info: 0, low: 1, medium: 2, high: 3, destructive: 4 };
+const INSTALL_UNIT_REVIEW_ACTIONS = new Set([
+  "block-install-unit",
+  "review-install-unit",
+  "trust-install-unit"
+]);
 
 export function makeAction(data) {
   return {
@@ -10,6 +15,7 @@ export function makeAction(data) {
     requires_user_confirmation: data.requiresUserConfirmation ?? requiresConfirmation(data.risk),
     dry_run: data.dryRun,
     apply: data.apply,
+    application: data.application ?? emptyApplication(data.blockedReason),
     applies_to: data.appliesTo,
     blocked_reason: data.blockedReason,
     advanced: data.advanced
@@ -41,7 +47,7 @@ export function sortActions(left, right) {
 
 export function linkReviewQueue(reviewQueue, actions) {
   const byUnit = new Map(actions
-    .filter((entry) => entry.kind === "review-install-unit")
+    .filter((entry) => INSTALL_UNIT_REVIEW_ACTIONS.has(entry.kind))
     .map((entry) => [entry.applies_to.id, entry.id]));
   return reviewQueue.map((entry) => {
     const unitId = entry.advanced.install_unit ?? entry.advanced.source_id;
@@ -53,6 +59,14 @@ export function linkReviewQueue(reviewQueue, actions) {
 
 function requiresConfirmation(risk) {
   return RISK_RANK[risk] >= RISK_RANK.medium;
+}
+
+function emptyApplication(blockedReason) {
+  return {
+    preview: null,
+    apply: null,
+    blocked_reason: blockedReason ?? "Action cannot be applied directly."
+  };
 }
 
 function shellQuote(value) {

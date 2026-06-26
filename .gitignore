@@ -4,5 +4,7 @@ dist/
 .DS_Store
 *.log
 .agent-work/
+.omo/
 .ultrawork/
 .ultrawork/evidence/*.tmp
+.skillboard/

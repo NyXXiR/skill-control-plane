@@ -84,7 +84,16 @@ async function findSkillFiles(root, seen = new Set()) {
 function parseSkillFrontmatter(text) {
   const match = /^---[ \t]*\r?\n(?<body>[\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   if (match?.groups === undefined) {
-    throw new Error("SKILL.md is missing YAML frontmatter");
+    throw new Error(
+      "SKILL.md is missing YAML frontmatter. " +
+      "Add --- delimiters at the top of the file with at least 'name' and 'description'.\n" +
+      "Example:\n" +
+      "---\n" +
+      "name: my-skill\n" +
+      "description: What this skill does in one sentence.\n" +
+      "---\n" +
+      "See docs/user-flow.md for the first-time skill guide."
+    );
   }
   const raw = requireRecord(YAML.parse(match.groups.body), "SKILL.md frontmatter");
   return {

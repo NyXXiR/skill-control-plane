@@ -50,7 +50,7 @@ test("policy rejects contradictory status and invocation combinations", async ()
 
   assert.equal(result.ok, false);
   assert.match(errors, /Active skill matt\.tdd cannot use invocation: blocked/);
-  assert.match(errors, /Deprecated skill matt\.grill-me must use invocation: deprecated or blocked/);
+  assert.match(errors, /matt\.grill-me with status deprecated must use one of: blocked, deprecated/);
 });
 
 test("policy rejects install units that list components they do not provide", async () => {

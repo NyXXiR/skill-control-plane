@@ -3,10 +3,22 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSkillBrief, initProject } from "../../src/index.mjs";
+import {
+  actionsConfig,
+  missingProvenanceConfig
+} from "./advisor-brief-action-fixtures.mjs";
 
 export async function withActionsFixture(run) {
   return await withFixture("skillboard-brief-actions-test-", actionsConfig(), async (paths) => {
-    await writeFixtureSkills(paths.skillsRoot, ["local-manual", "matt-tdd", "omo-runtime", "blocked-helper"]);
+    await writeFixtureSkills(paths.skillsRoot, [
+      "local-manual",
+      "matt-tdd",
+      "omo-runtime",
+      "safe-helper",
+      "medium-helper",
+      "runtime-helper",
+      "blocked-helper"
+    ]);
     return await run(paths);
   });
 }
@@ -46,6 +58,15 @@ export function assertCommandObject(value) {
   assert.ok(value.argv.every((part) => typeof part === "string"));
   assert.equal(typeof value.display, "string");
   assert.notEqual(value.display.length, 0);
+}
+
+export function assertApplicationCommandObject(value, actionId) {
+  assertCommandObject(value);
+  assert.deepEqual(value.argv.slice(0, 3), ["skillboard", "apply-action", actionId]);
+  assert.ok(value.argv.includes("--config"));
+  assert.ok(value.argv.includes("--skills"));
+  assert.ok(value.argv.includes("--json"));
+  assert.match(value.display, /skillboard apply-action/);
 }
 
 export function assertNoBareCommandStrings(actions) {
@@ -96,120 +117,4 @@ description: Test skill ${name}.
       "utf8"
     );
   }
-}
-
-function actionsConfig() {
-  return `${baseConfig()}
-skills:
-  user.local-manual:
-    path: local-manual
-    status: active
-    invocation: manual-only
-    exposure: exported
-    category: user
-  matt.tdd:
-    path: matt-tdd
-    status: active
-    invocation: workflow-auto
-    exposure: unit-managed
-    category: plugin
-    owner_install_unit: matt.pack
-  omo.runtime:
-    path: omo-runtime
-    status: active
-    invocation: workflow-auto
-    exposure: unit-managed
-    category: plugin
-    owner_install_unit: omo.pack
-  user.blocked:
-    path: blocked-helper
-    status: blocked
-    invocation: blocked
-    exposure: exported
-    category: user
-capabilities: {}
-harnesses:
-  codex:
-    status: primary
-    workflows:
-      - agent
-      - research
-workflows:
-  agent:
-    harness: codex
-    active_skills:
-      - user.local-manual
-      - omo.runtime
-    blocked_skills: []
-  research:
-    harness: codex
-    active_skills:
-      - matt.tdd
-    blocked_skills: []
-install_units:
-  matt.pack:
-    kind: plugin
-    source: npx matt install
-    scope: user-global
-    enabled: true
-    trust_level: reviewed
-    permission_risk: medium
-    source_digest: sha256:matt
-    provided_components:
-      - skills
-    components:
-      skills:
-        - matt.tdd
-  omo.pack:
-    kind: plugin
-    source: npx omo install
-    scope: user-global
-    enabled: true
-    trust_level: unreviewed
-    permission_risk: high
-    provided_components:
-      - skills
-    components:
-      skills:
-        - omo.runtime
-`;
-}
-
-function missingProvenanceConfig() {
-  return `${baseConfig()}
-skills:
-  broken.auto:
-    path: broken-auto
-    status: active
-    invocation: workflow-auto
-    exposure: unit-managed
-    category: plugin
-capabilities: {}
-harnesses:
-  codex:
-    status: primary
-    workflows:
-      - agent
-      - research
-workflows:
-  agent:
-    harness: codex
-    active_skills: []
-    blocked_skills: []
-  research:
-    harness: codex
-    active_skills:
-      - broken.auto
-    blocked_skills: []
-install_units: {}
-`;
-}
-
-function baseConfig() {
-  return `version: 1
-defaults:
-  invocation_policy: deny-by-default
-  allow_model_invocation: false
-  require_explicit_workflow: true
-`;
 }

@@ -7,6 +7,9 @@ import {
   sortActions,
   workflowResolved
 } from "./action-core.mjs";
+import { withApplicationCommands } from "./application-commands.mjs";
+import { buildSetupGuidanceActions } from "./setup-actions.mjs";
+import { trustRecommendationAction } from "./trust-policy.mjs";
 
 const WRITABLE_MODES = new Set(["manual-only", "router-only", "workflow-auto"]);
 
@@ -27,14 +30,15 @@ export function buildInitActions(paths) {
 }
 
 export function buildActionCards(context) {
-  const actions = [
+  const actions = withApplicationCommands([
+    ...buildSetupGuidanceActions(context),
     ...reviewInstallUnitActions(context),
     ...activateSkillActions(context),
     ...blockSkillActions(context),
     ...hookInstallActions(context),
     ...removeSkillForceActions(context),
     resetCleanupAction(context)
-  ].filter(Boolean).sort(sortActions);
+  ].filter(Boolean).sort(sortActions), context);
   return {
     actions,
     reviewQueue: linkReviewQueue(context.reviewQueue, actions)
@@ -46,29 +50,33 @@ function reviewInstallUnitActions({ paths, workflow, reviewQueue }) {
   for (const entry of reviewQueue) {
     const unitId = entry.advanced.install_unit ?? entry.advanced.source_id;
     if (unitId !== undefined && entry.kind === "install_unit") {
-      units.set(unitId, entry.risk);
+      units.set(unitId, {
+        risk: entry.risk,
+        recommended: entry.advanced.recommended_trust_level ?? "reviewed"
+      });
     }
   }
-  return [...units.entries()].map(([unitId, risk]) => {
+  return [...units.entries()].map(([unitId, { risk, recommended }]) => {
+    const action = trustRecommendationAction(recommended);
     const dryRun = command([
-      "skillboard", "review", "install-unit", unitId, "--trust-level", "reviewed",
+      "skillboard", "review", "install-unit", unitId, "--trust-level", recommended,
       "--config", paths.configPath, "--skills", paths.skillsRoot, "--dry-run", "--json"
     ]);
     return makeAction({
-      kind: "review-install-unit",
+      kind: action.kind,
       targetId: unitId,
-      label: `Review source ${unitId}`,
-      reason: "Review the source before enabling its model-selectable skills.",
+      label: `${action.label} ${unitId}`,
+      reason: action.reason,
       risk,
       requiresUserConfirmation: true,
       dryRun,
       apply: applyOrNull(workflow, dryRun, [
-        "skillboard", "review", "install-unit", unitId, "--trust-level", "reviewed",
+        "skillboard", "review", "install-unit", unitId, "--trust-level", recommended,
         "--config", paths.configPath, "--skills", paths.skillsRoot, "--json"
       ]),
       appliesTo: { kind: "install_unit", id: unitId },
       blockedReason: blockedByWorkflow(workflow),
-      advanced: { trust_level: "reviewed" }
+      advanced: { trust_level: recommended }
     });
   });
 }

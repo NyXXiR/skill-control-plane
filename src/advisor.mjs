@@ -25,20 +25,20 @@ import { loadWorkspace } from "./workspace.mjs";
 export async function buildSkillBrief(options = {}) {
   const paths = resolveProjectPaths(options);
   const cleanup = await buildCleanup(paths.root);
-  const doctor = await doctorProject({
+  const configDoctor = await doctorProject({
     root: paths.root,
     configPath: paths.configPath,
     skillsRoot: paths.skillsRoot
   });
 
-  if (!doctor.config.exists || !doctor.initialized) {
+  if (!configDoctor.config.exists || !configDoctor.initialized) {
     return buildBrief({
       ok: false,
       error: {
         code: "not-initialized",
-        message: doctor.config.error ?? "skillboard.config.yaml was not found"
+        message: configDoctor.config.error ?? "skillboard.config.yaml was not found"
       },
-      health: healthFromDoctor(doctor, paths),
+      health: healthFromDoctor(configDoctor, paths),
       workflow: emptyWorkflowState(),
       skills: emptySkillGroups(),
       sources: emptySources(),
@@ -48,10 +48,10 @@ export async function buildSkillBrief(options = {}) {
     });
   }
 
-  if (!doctor.config.valid) {
-    return buildExpectedConfigError(doctor, paths, cleanup, {
+  if (!configDoctor.config.valid) {
+    return buildExpectedConfigError(configDoctor, paths, cleanup, {
       code: "invalid-config",
-      message: doctor.config.error ?? "skillboard.config.yaml is invalid"
+      message: configDoctor.config.error ?? "skillboard.config.yaml is invalid"
     });
   }
 
@@ -59,12 +59,19 @@ export async function buildSkillBrief(options = {}) {
   try {
     workspace = await loadWorkspace({ configPath: paths.configPath, skillsRoot: paths.skillsRoot });
   } catch (error) {
-    return buildExpectedConfigError(doctor, paths, cleanup, {
+    return buildExpectedConfigError(configDoctor, paths, cleanup, {
       code: "invalid-config",
       message: error instanceof Error ? error.message : String(error)
     });
   }
 
+  const doctor = await doctorProject({
+    root: paths.root,
+    configPath: paths.configPath,
+    skillsRoot: paths.skillsRoot,
+    workspace,
+    verifySources: options.verifySources
+  });
   const sourceAudit = auditSources(workspace);
   const workflow = resolveWorkflow(listWorkflows(workspace), options.workflow);
   const reviewQueue = buildReviewQueue(workspace, sourceAudit);

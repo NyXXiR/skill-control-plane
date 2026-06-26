@@ -113,23 +113,53 @@ This repository is an early CLI-first foundation. It currently supports:
 
 ## Quick Start
 
-Use it from a clone today:
+Bootstrap a project with one npm/npx command, without installing a global
+binary:
+
+```bash
+npx agent-skillboard init
+```
+
+In CI or scripts, the explicit package form avoids any ambiguity about the
+binary name:
+
+```bash
+npx --yes --package agent-skillboard skillboard init
+```
+
+The equivalent npm exec spelling:
+
+```bash
+npm exec --yes --package agent-skillboard -- skillboard init
+```
+
+Then check the project:
+
+```bash
+npx --yes --package agent-skillboard skillboard doctor
+```
+
+For repeated local use, install the CLI globally:
+
+```bash
+npm install -g agent-skillboard
+skillboard init
+skillboard doctor
+```
+
+For development from a clone:
 
 ```bash
 git clone https://github.com/NyXXiR/skillboard.git
 cd skillboard
 npm install
 npm test
-npm link
-skillboard init
-skillboard doctor
+node bin/skillboard.mjs init
+node bin/skillboard.mjs doctor
 ```
 
-After the npm package is published, install it globally:
-
-```bash
-npm install -g agent-skillboard
-```
+Most examples below use the global or npm-exec `skillboard` command. When
+running from a clone, replace `skillboard ` with `node bin/skillboard.mjs `.
 
 Useful first commands:
 
@@ -144,26 +174,41 @@ skillboard rollout plan --config skillboard.config.yaml --skills skills --json
 
 `skillboard init` creates `skillboard.config.yaml`, `skills/`,
 `.skillboard/reports/`, `.skillboard/profiles/`, `AGENTS.md`, and `CLAUDE.md`.
-It also scans known local agent skill roots, including Codex user/system skills
-and Codex plugin-cache manifests. Trusted user-local skills are imported as
-`active-manual` and attached to a generated local manual workflow when the
-project has no workflow metadata yet, so a first-time user can immediately use
-their own manual skills through `can-use` and guard checks. System, plugin, and
-other runtime-supplied skills stay `quarantined` / `blocked`; plugin hooks, MCP
-servers, commands, and modified config files are attached to the owning install
-unit for review. The agent bridge files tell Codex-style and Claude Code agents
-to use `skillboard.config.yaml` as the control-plane source of truth instead of
-treating every installed `SKILL.md` as active.
+It also scans known local agent skill roots, including Codex user/system skills,
+Codex plugin-cache manifests, Claude user skills, Hermes user skills, and Hermes
+profile skills under `.hermes/profiles/*/skills`. Trusted user-local skills are
+imported as `status: active` with `invocation: manual-only` and attached to a
+generated local manual workflow when the project has no workflow metadata yet,
+so a first-time user can immediately use their own manual skills through
+`can-use` and guard checks without receiving legacy-state warning noise. System,
+plugin, and other runtime-supplied skills stay `quarantined` / `blocked`; plugin
+hooks, MCP servers, commands, and modified config files are attached to the
+owning install unit for review. The agent bridge files tell Codex-style and
+Claude Code agents to use `skillboard.config.yaml` as the control-plane source
+of truth instead of treating every installed `SKILL.md` as active.
 
 When you ask an agent "what skills can you use?", the bridge tells it to run
 `skillboard brief --json` before answering. The brief is designed for
 AI-mediated use without becoming another policy engine: it summarizes "What
-your AI can use now", what needs review, what is blocked for safety, and which
-change suggestions are available as action cards. Before an agent applies a
-risk-bearing action card, it should ask for user confirmation; after any
-mutating apply, it should rerun `skillboard brief --json` before answering the
-next availability question or applying another action. Immediately before a
-skill is actually invoked, `skillboard guard use ...` remains the final gate.
+your AI can use now", what needs your decision, what is blocked for safety, and
+which change suggestions are available as action cards. Reviewable items should
+feel like a short decision queue, not repeated blocked chores: once the source,
+skill, and workflow decision is recorded, the same prompt should not return
+unless that input changes. Before an agent applies a risk-bearing action card,
+it should pick one current action id from the brief, ask for user confirmation,
+then use
+`skillboard apply-action <action-id> --yes --json` with the same config, skills,
+and workflow options instead of running raw action-card shell text. After a
+mutating `apply-action`, the agent should read the returned post-apply brief
+before answering the next availability question or applying another action.
+`apply-action` re-resolves the current brief, so stale action ids, cached action
+cards, and multi-action batches are refused rather than replayed.
+Immediately before a skill is actually invoked,
+`skillboard guard use ...` remains the final gate.
+The default text brief is compact for large skill sets: it keeps the summary,
+top categories, next safe action, short section previews, and short action
+summaries. Use `skillboard brief --verbose` when you need the full list or
+full copyable command details.
 
 Run `skillboard doctor` after init to see config health, bridge status, managed
 skill/install-unit counts, policy/source audit summaries, and the default
@@ -184,10 +229,10 @@ init and reports the text and YAML semantic config change plan. If the project
 has no workflows yet, newly discovered trusted user-local skills are attached to
 a generated manual workflow; if workflows already exist, those skills are kept as
 manual-only candidates and the refresh prints a review note to attach them with
-`skillboard add workflow`. Runtime or external skills remain quarantined /
-blocked until a workflow explicitly activates them. Broken detector entries or
-malformed `SKILL.md` files are reported as scan warnings instead of aborting the
-whole refresh.
+`skillboard add workflow`. Runtime or external skills remain out of automatic
+use until the source and workflow decisions are recorded. Broken detector
+entries or malformed `SKILL.md` files are reported as scan warnings instead of
+aborting the whole refresh.
 
 Add new local growth paths without hand-editing YAML:
 
@@ -266,6 +311,19 @@ node bin/skillboard.mjs lock write \
   --skills examples/multi-source-skills \
   --out .skillboard/reports/multi-source.lock.yaml \
   --replace
+node bin/skillboard.mjs apply-action <action-id> \
+  --workflow codex-night-workflow \
+  --config examples/multi-source.config.yaml \
+  --skills examples/multi-source-skills \
+  --yes --json
+```
+
+For hook action cards, keep `apply-action` as the primary flow:
+`node bin/skillboard.mjs apply-action <action-id> ... --yes --json`. The raw
+hook commands below are underlying manual operator detail for previewing and
+materializing an executable guard hook outside the action-card approval loop:
+
+```bash
 node bin/skillboard.mjs hook install \
   --workflow codex-night-workflow \
   --config examples/multi-source.config.yaml \
@@ -281,8 +339,9 @@ node bin/skillboard.mjs hook install \
   --skillboard-bin "node bin/skillboard.mjs"
 ```
 
-Preview hook installs with `--dry-run --json` and inspect
-`planned.preview.shell` before applying the same command without those flags.
+For manual hook installation, preview with `--dry-run --json` and inspect
+`planned.preview.shell` before an operator materializes the matching non-dry-run
+hook command directly.
 The multi-source example intentionally uses project-root-relative local paths,
 such as `./examples/multi-source-skills/private`, so a fresh clone can run these
 commands without editing machine-specific paths.
@@ -419,7 +478,7 @@ Invocation modes:
 - `router-only`: a router/orchestrator may select it after policy checks.
 - `workflow-auto`: model invocation is allowed only inside listed workflows.
 - `global-auto`: allowed globally; use sparingly.
-- `blocked`: installed but never callable.
+- `blocked`: installed but not callable until policy or provenance changes.
 - `deprecated`: kept for history, not for new use.
 
 Skill exposure:
@@ -455,40 +514,48 @@ pinned with `skillboard sources refresh`.
 
 ## Commands
 
+All commands below use the global `skillboard` binary. When running from a
+clone without `npm install -g agent-skillboard`, replace `skillboard ` with
+`node bin/skillboard.mjs ` and run from the repository root.
+
 ```bash
 skillboard init [--dir <path>] [--scan-root <dir>[,<dir>]] [--no-scan-installed]
 skillboard uninstall [--dir <path>] [--dry-run] [--remove-config|--reset-config] [--remove-reports] [--remove-hooks] [--keep-empty-dirs]
 skillboard inventory refresh [--dir <path>] [--config <path>] [--scan-root <dir>[,<dir>]] [--dry-run] [--json]
 skillboard inventory detect --unit <id> --config <path> [--install-output <path>] [--config-file a,b] [--source <value>] [--kind <kind>] [--scope <scope>] [--dry-run] [--json]
 skillboard sources refresh [--dir <path>] [--config <path>] [--unit <id>[,<id>]] [--cache-dir <dir>] [--dry-run] [--json]
-skillboard doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json]
-skillboard status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json]
-skillboard brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--json]
+skillboard doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json] [--summary]
+skillboard status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json] [--summary]
+skillboard brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]
+skillboard apply-action <action-id> [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--dry-run] [--yes] [--allow-destructive] [--json]
 skillboard import --profile <id-or-path> --source-root <dir> [--profile-dirs a,b] [--out <path>]
 skillboard import --profile <id-or-path> --source-root <dir> --config <path> --merge [--replace] [--dry-run]
-node bin/skillboard.mjs scan --config <path> --skills <dir>
-node bin/skillboard.mjs check --config <path> --skills <dir>
-node bin/skillboard.mjs list [skills|workflows|harnesses|install-units] --config <path> --skills <dir>
-node bin/skillboard.mjs explain <skill-id> --config <path> --skills <dir>
-node bin/skillboard.mjs can-use <skill-id> --workflow <name> --config <path> --skills <dir>
-node bin/skillboard.mjs guard use <skill-id> --workflow <name> --config <path> --skills <dir>
-node bin/skillboard.mjs audit sources --config <path> --skills <dir> [--verify]
+skillboard scan --config <path> --skills <dir>
+skillboard check --config <path> --skills <dir>
+skillboard list [skills|workflows|harnesses|install-units] --config <path> --skills <dir>
+skillboard explain <skill-id> --config <path> --skills <dir>
+skillboard can-use <skill-id> --workflow <name> --config <path> --skills <dir>
+skillboard guard use <skill-id> --workflow <name> --config <path> --skills <dir>
+skillboard audit sources --config <path> --skills <dir> [--verify]
 skillboard rollout [audit|plan|apply|rollback|report] [--dir <path>] [--config <path>] [--skills <dir>] [--transaction <id>] [--json]
-node bin/skillboard.mjs hook install --workflow <name> --config <path> --skills <dir> [--out <path>] [--skillboard-bin <path>] [--dry-run] [--json]
-node bin/skillboard.mjs lock write --config <path> --skills <dir> [--out <path>] [--replace] [--allow-unverified]
-node bin/skillboard.mjs review install-unit <unit-id> [--trust-level trusted|reviewed|unreviewed|blocked] --config <path> --skills <dir>
-node bin/skillboard.mjs add skill <skill-id> --path <relative-skill-path> --config <path> --skills <dir>
-node bin/skillboard.mjs add workflow <workflow-name> --harness <harness-name> --config <path> --skills <dir> [--skill <id>[,<id>]]
-node bin/skillboard.mjs add harness <harness-name> --config <path> --skills <dir> [--status <status>] [--command <cmd>[,<cmd>]]
-node bin/skillboard.mjs activate <skill-id> --workflow <name> --config <path> --skills <dir>
-node bin/skillboard.mjs block <skill-id> --workflow <name> --config <path> --skills <dir>
-node bin/skillboard.mjs quarantine <skill-id> --config <path> --skills <dir>
-node bin/skillboard.mjs prefer <skill-id> --workflow <name> --capability <name> --config <path> --skills <dir>
-node bin/skillboard.mjs remove skill <skill-id> --config <path> --skills <dir> [--force]
-node bin/skillboard.mjs dashboard --config <path> --skills <dir> [--out <path>]
-node bin/skillboard.mjs reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--out <path>]
-node bin/skillboard.mjs impact disable <skill-id> --config <path> --skills <dir> [--out <path>]
+skillboard hook install --workflow <name> --config <path> --skills <dir> [--out <path>] [--skillboard-bin <path>] [--dry-run] [--json]
+skillboard lock write --config <path> --skills <dir> [--out <path>] [--replace] [--allow-unverified]
+skillboard review install-unit <unit-id> [--trust-level trusted|reviewed|unreviewed|blocked] --config <path> --skills <dir>
+skillboard add skill <skill-id> --path <relative-skill-path> --config <path> --skills <dir>
+skillboard add workflow <workflow-name> --harness <harness-name> --config <path> --skills <dir> [--skill <id>[,<id>]]
+skillboard add harness <harness-name> --config <path> --skills <dir> [--status <status>] [--command <cmd>[,<cmd>]]
+skillboard activate <skill-id> --workflow <name> --config <path> --skills <dir>
+skillboard block <skill-id> --workflow <name> --config <path> --skills <dir>
+skillboard quarantine <skill-id> --config <path> --skills <dir>
+skillboard prefer <skill-id> --workflow <name> --capability <name> --config <path> --skills <dir>
+skillboard remove skill <skill-id> --config <path> --skills <dir> [--force]
+skillboard dashboard --config <path> --skills <dir> [--out <path>]
+skillboard reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--out <path>]
+skillboard impact disable <skill-id> --config <path> --skills <dir> [--out <path>]
 ```
+
+The bundled examples in this repository use `node bin/skillboard.mjs` explicitly
+because they are meant to run from a fresh clone without a global install.
 
 ## Reconciliation Model
 

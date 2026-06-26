@@ -437,7 +437,7 @@ install_units: {}
     assert.match(addWorkflow.stdout, /Added workflow daily-workflow/);
     assert.match(config, /commands:\n\s+- \$codex/);
     assert.match(config, /workflows:\n\s+- daily-workflow/);
-    assert.match(config, /user\.helper:\n\s+path: user-helper\n\s+status: active-manual\n\s+invocation: manual-only/);
+    assert.match(config, /user\.helper:\n\s+path: user-helper\n\s+status: active\n\s+invocation: manual-only/);
     assert.equal(allowedPayload.allowed, true);
     assert.equal(allowedPayload.automaticAllowed, false);
   } finally {
@@ -1128,7 +1128,7 @@ test("cli init scans installed local user skills into manual workflow state", as
     assert.match(config, /demo:review:/);
     assert.match(config, /status: quarantined/);
     assert.match(config, /invocation: blocked/);
-    assert.match(config, /local-helper:\n\s+path: local-helper\n\s+status: active-manual\n\s+invocation: manual-only/);
+    assert.match(config, /local-helper:\n\s+path: local-helper\n\s+status: active\n\s+invocation: manual-only/);
     assert.match(config, /codex-local-manual:\n\s+harness: codex\n\s+active_skills:\n\s+- local-helper/);
     assert.match(config, /owner_install_unit: codex\.system-skills/);
     assert.match(config, /owner_install_unit: codex\.user-skills/);
@@ -1202,9 +1202,46 @@ test("cli inventory refresh rescans installed skills and supports dry-run", asyn
     assert.match(refresh.stdout, /Added harnesses: `codex`/);
     assert.match(refresh.stdout, /Scan warnings: `.*broken-helper[\\/]SKILL\.md skipped/);
     assert.match(config, /local-helper:/);
-    assert.match(config, /status: active-manual/);
+    assert.match(config, /status: active/);
     assert.match(config, /invocation: manual-only/);
     assert.match(config, /codex-local-manual:/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli init scans Hermes profile skills into canonical manual workflow state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-hermes-init-scan-test-"));
+  try {
+    const home = join(root, "home");
+    const project = join(root, "project");
+    const hermesHome = join(home, ".hermes");
+    await writeSkill(join(hermesHome, "profiles", "codex", "skills", "apple-notes"), "apple-notes");
+    await writeSkill(join(hermesHome, "profiles", "codex", "skills", "software", "review"), "software-review");
+
+    const env = { ...process.env, HOME: home, HERMES_HOME: hermesHome, SKILLBOARD_INIT_SCAN_ROOTS: "" };
+    const init = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "init", "--dir", project], { env });
+    const configPath = join(project, "skillboard.config.yaml");
+    const config = await readFile(configPath, "utf8");
+    const check = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "check",
+      "--config",
+      configPath,
+      "--skills",
+      join(project, "skills")
+    ], { env });
+
+    assert.match(init.stdout, /Scanned installed agent skills: 2/);
+    assert.match(init.stdout, /Managed install units: 1/);
+    assert.match(init.stdout, /Added workflows: `hermes-codex-local-manual`/);
+    assert.match(init.stdout, /Added harnesses: `hermes`/);
+    assert.match(config, /apple-notes:\n\s+path: apple-notes\n\s+status: active\n\s+invocation: manual-only/);
+    assert.match(config, /software-review:\n\s+path: software\/review\n\s+status: active\n\s+invocation: manual-only/);
+    assert.match(config, /owner_install_unit: hermes\.profile\.codex\.skills/);
+    assert.match(config, /hermes-codex-local-manual:\n\s+harness: hermes\n\s+active_skills:\n\s+- apple-notes\n\s+- software-review/);
+    assert.match(check.stdout, /Policy check passed/);
+    assert.doesNotMatch(check.stdout, /SKILL-STATUS-001/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

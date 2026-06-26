@@ -1,0 +1,255 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { withActionsFixture } from "./helpers/advisor-brief-actions.mjs";
+
+const execFileAsync = promisify(execFile);
+const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const skillboardBin = join(repoRoot, "bin/skillboard.mjs");
+
+test("apply-action dry-run previews the selected current action without mutating config", async () => {
+  await withActionsFixture(async (paths) => {
+    const originalConfig = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      "trust-install-unit:safe.pack",
+      ...workflowArgs(paths),
+      "--dry-run",
+      "--json"
+    ]);
+    const afterConfig = await readFile(paths.configPath, "utf8");
+
+    assert.equal(afterConfig, originalConfig);
+    assert.equal(result.exitCode, 0, commandFailure(result));
+
+    const payload = parseJson(result);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.mode, "preview");
+    assert.equal(payload.changed, false);
+    assert.equal(payload.action.id, "trust-install-unit:safe.pack");
+    assert.equal(payload.action.kind, "trust-install-unit");
+    assert.equal(payload.action.applies_to.id, "safe.pack");
+    assert.equal(payload.action.risk, "low");
+    assert.equal(payload.action.apply.argv[0], "skillboard");
+  });
+});
+
+test("apply-action --yes --json applies a review action and returns a fresh post-apply brief", async () => {
+  await withActionsFixture(async (paths) => {
+    const originalConfig = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      "review-install-unit:medium.pack",
+      ...workflowArgs(paths),
+      "--yes",
+      "--json"
+    ]);
+
+    assert.equal(result.exitCode, 0, commandFailure(result));
+
+    const payload = parseJson(result);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.mode, "applied");
+    assert.equal(payload.action.id, "review-install-unit:medium.pack");
+    assert.equal(payload.control.changed, true);
+    assert.equal(payload.brief.schema_version, 1);
+    assert.equal(payload.brief.health.config.valid, true);
+    assert.ok(Array.isArray(payload.brief.actions));
+    assert.equal(
+      payload.brief.actions.some((action) => action.id === "review-install-unit:medium.pack"),
+      false
+    );
+    assert.equal(
+      payload.brief.review_queue.some((entry) => entry.id === "install_unit:medium.pack"),
+      false
+    );
+
+    const updatedConfig = await readFile(paths.configPath, "utf8");
+    assert.notEqual(updatedConfig, originalConfig);
+    assert.match(updatedConfig, /medium\.pack:[\s\S]*trust_level: reviewed/);
+  });
+});
+
+test("apply-action text mode prints the returned post-apply brief after mutation", async () => {
+  await withActionsFixture(async (paths) => {
+    const result = await runSkillboard([
+      "apply-action",
+      "review-install-unit:medium.pack",
+      ...workflowArgs(paths),
+      "--yes"
+    ]);
+
+    assert.equal(result.exitCode, 0, commandFailure(result));
+    assert.match(result.stdout, /Applied action: review-install-unit:medium\.pack/);
+    assert.match(result.stdout, /Returned post-apply brief:/);
+    assert.match(result.stdout, /# SkillBoard Brief/);
+    assert.doesNotMatch(result.stdout.split("Returned post-apply brief:")[1], /review-install-unit:medium\.pack/);
+  });
+});
+
+test("apply-action refuses a stale action id with structured JSON and no mutation", async () => {
+  await withActionsFixture(async (paths) => {
+    const manualReview = await runSkillboard([
+      "review",
+      "install-unit",
+      "medium.pack",
+      "--trust-level",
+      "reviewed",
+      "--config",
+      paths.configPath,
+      "--skills",
+      paths.skillsRoot,
+      "--json"
+    ]);
+    assert.equal(manualReview.exitCode, 0, commandFailure(manualReview));
+
+    const configAfterManualReview = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      "review-install-unit:medium.pack",
+      ...workflowArgs(paths),
+      "--yes",
+      "--json"
+    ]);
+    const afterConfig = await readFile(paths.configPath, "utf8");
+
+    assert.equal(afterConfig, configAfterManualReview);
+    assert.notEqual(result.exitCode, 0);
+
+    const payload = parseJson(result);
+    assertStructuredError(payload, "stale-action", /current|stale|not found/i);
+  });
+});
+
+test("apply-action without --yes previews medium-risk action and leaves config unchanged", async () => {
+  await withActionsFixture(async (paths) => {
+    const originalConfig = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      "review-install-unit:medium.pack",
+      ...workflowArgs(paths),
+      "--json"
+    ]);
+    const afterConfig = await readFile(paths.configPath, "utf8");
+
+    assert.equal(afterConfig, originalConfig);
+    assert.equal(result.exitCode, 0, commandFailure(result));
+
+    const payload = parseJson(result);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.mode, "preview");
+    assert.equal(payload.changed, false);
+    assert.equal(payload.action.id, "review-install-unit:medium.pack");
+    assert.equal(payload.action.kind, "review-install-unit");
+  });
+});
+
+test("apply-action destructive reset requires both --yes and --allow-destructive", async () => {
+  await assertDestructiveResetRejected(
+    ["--yes", "--json"],
+    "destructive-confirmation-required",
+    /--allow-destructive|destructive/i
+  );
+});
+
+test("apply-action cannot apply unresolved or unknown workflow actions", async () => {
+  await assertWorkflowActionRejected([], /workflow|select/i);
+  await assertWorkflowActionRejected(["--workflow", "missing-workflow"], /unknown workflow|workflow/i);
+});
+
+async function assertDestructiveResetRejected(extraArgs, expectedCode, messagePattern) {
+  await withActionsFixture(async (paths) => {
+    const originalConfig = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      `reset-cleanup:${paths.root}`,
+      ...workflowArgs(paths),
+      ...extraArgs
+    ]);
+    const afterConfig = await readFile(paths.configPath, "utf8");
+
+    assert.equal(afterConfig, originalConfig);
+    assert.notEqual(result.exitCode, 0);
+
+    const payload = parseJson(result);
+    assertStructuredError(payload, expectedCode, messagePattern);
+  });
+}
+
+async function assertWorkflowActionRejected(workflowOptions, messagePattern) {
+  await withActionsFixture(async (paths) => {
+    const originalConfig = await readFile(paths.configPath, "utf8");
+    const result = await runSkillboard([
+      "apply-action",
+      "review-install-unit:medium.pack",
+      ...workflowOptions,
+      "--config",
+      paths.configPath,
+      "--skills",
+      paths.skillsRoot,
+      "--yes",
+      "--json"
+    ]);
+    const afterConfig = await readFile(paths.configPath, "utf8");
+
+    assert.equal(afterConfig, originalConfig);
+    assert.notEqual(result.exitCode, 0);
+
+    const payload = parseJson(result);
+    assert.equal(payload.ok, false);
+    assert.equal(typeof payload.error?.code, "string");
+    assert.match(payload.error.message, messagePattern);
+  });
+}
+
+function workflowArgs(paths) {
+  return [
+    "--workflow",
+    "agent",
+    "--config",
+    paths.configPath,
+    "--skills",
+    paths.skillsRoot
+  ];
+}
+
+async function runSkillboard(args) {
+  try {
+    const result = await execFileAsync(process.execPath, [skillboardBin, ...args], {
+      cwd: repoRoot
+    });
+    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    return {
+      exitCode: typeof error.code === "number" ? error.code : 1,
+      stdout: error.stdout ?? "",
+      stderr: error.stderr ?? ""
+    };
+  }
+}
+
+function parseJson(result) {
+  assert.match(result.stdout, /^\s*\{/, `expected JSON stdout, got:\n${commandFailure(result)}`);
+  return JSON.parse(result.stdout);
+}
+
+function assertStructuredError(payload, expectedCode, messagePattern) {
+  assert.equal(payload.ok, false);
+  assert.equal(payload.error.code, expectedCode);
+  assert.equal(typeof payload.error.message, "string");
+  assert.match(payload.error.message, messagePattern);
+}
+
+function commandFailure(result) {
+  return [
+    `exitCode=${result.exitCode}`,
+    "stdout:",
+    result.stdout,
+    "stderr:",
+    result.stderr
+  ].join("\n");
+}

@@ -1,0 +1,80 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { withBriefFixture } from "./helpers/advisor-brief-fixtures.mjs";
+import { runCli } from "./helpers/brief-cli.mjs";
+
+test("brief command renders complete application commands for long paths", async () => {
+  await withLongTmpdir(async () => {
+    await withBriefFixture(async ({ configPath, root, skillsRoot }) => {
+      const compact = await runCli([
+        "brief",
+        "--config",
+        configPath,
+        "--skills",
+        skillsRoot,
+        "--workflow",
+        "daily-workflow"
+      ]);
+      const result = await runCli([
+        "brief",
+        "--config",
+        configPath,
+        "--skills",
+        skillsRoot,
+        "--workflow",
+        "daily-workflow",
+        "--verbose"
+      ]);
+
+      assert.equal(compact.code, 0);
+      assert.doesNotMatch(compact.stdout, /apply action: `skillboard apply-action/);
+      assert.doesNotMatch(compact.stdout, /underlying apply: `/);
+      assert.match(compact.stdout, /details: `skillboard brief --verbose --workflow daily-workflow`/);
+
+      assert.equal(result.code, 0);
+      const applyActionLine = result.stdout
+        .split("\n")
+        .find((line) => line.includes("apply action: `skillboard apply-action"));
+
+      assert.ok(applyActionLine, "expected an application apply action line");
+      assert.doesNotMatch(applyActionLine, /\.\.\./);
+      assert.match(applyActionLine, /apply action: `skillboard apply-action [^`]+`$/);
+      assert.ok(applyActionLine.includes(` --dir ${root}`));
+      assert.ok(applyActionLine.includes(` --config ${configPath}`));
+      assert.ok(applyActionLine.includes(` --skills ${skillsRoot}`));
+      assert.ok(applyActionLine.includes(" --yes"));
+      assert.ok(applyActionLine.includes(" --json"));
+
+      const underlyingApplyLine = result.stdout
+        .split("\n")
+        .find((line) => line.includes("underlying apply: `"));
+      assert.ok(underlyingApplyLine, "expected raw underlying apply details");
+      assert.match(underlyingApplyLine, /\.\.\./);
+    });
+  });
+});
+
+async function withLongTmpdir(run) {
+  const parent = await mkdtemp(join(tmpdir(), "skillboard-brief-long-command-parent-"));
+  const longTmpdir = join(
+    parent,
+    "path-long-enough-to-force-application-command-display-past-safe-text-limit",
+    "another-long-segment-containing-fixture-state-for-brief-rendering"
+  );
+  const previousTmpdir = process.env.TMPDIR;
+  try {
+    await mkdir(longTmpdir, { recursive: true });
+    process.env.TMPDIR = longTmpdir;
+    return await run();
+  } finally {
+    if (previousTmpdir === undefined) {
+      delete process.env.TMPDIR;
+    } else {
+      process.env.TMPDIR = previousTmpdir;
+    }
+    await rm(parent, { recursive: true, force: true });
+  }
+}

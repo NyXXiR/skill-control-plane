@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
+import YAML from "yaml";
 import {
   activateSkill,
   addHarness,
@@ -41,9 +42,14 @@ import {
   writeLockfile
 } from "./index.mjs";
 // SIZE_OK: src/cli.mjs is pre-existing command-router debt; brief behavior delegates to src/brief-cli.mjs and hook planning delegates through src/hook-plan.mjs until a broader router split.
+import { ApplyActionError, applyActionErrorPayload, applyAdvisorAction } from "./advisor/apply-action.mjs";
 import { runBriefCommand } from "./brief-cli.mjs";
+import { renderSkillBrief } from "./brief-renderer.mjs";
 import { planGuardHookInstall } from "./control.mjs";
+import { writeCheckedConfig } from "./control/config-write.mjs";
 import { runInitCommand, runUninstallCommand } from "./lifecycle-cli.mjs";
+
+const APPLY_ACTION_VALUE_OPTIONS = new Set(["workflow", "dir", "config", "skills", "out", "skillboard-bin"]);
 
 export async function main(argv, stdout, stderr) {
   try {
@@ -80,6 +86,8 @@ async function run(argv, stdout, stderr) {
         configPath: configPath(options),
         skillsRoot: skillsRoot(options)
       });
+    case "apply-action":
+      return await applyActionCommand(argv.slice(1), options, stdout, stderr);
     case "list":
       return await list(argv.slice(1), options, stdout);
     case "explain":
@@ -152,24 +160,25 @@ async function importProfile(options, stdout) {
 }
 
 async function mergeImport(options, imported, stdout) {
-  const path = options.get("config");
-  if (path === undefined) {
-    throw new Error("Usage: skillboard import --profile <id-or-path> --source-root <dir> --config <path> --merge");
+  const path = configPath(options);
+  const originalText = await readFile(path, "utf8");
+  const merged = mergeImportFragment(originalText, imported, { replace: options.get("replace") === "true" });
+  const document = YAML.parseDocument(merged.text);
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid YAML config after import merge: ${document.errors.map((error) => error.message).join("; ")}`);
   }
-  const merged = mergeImportFragment(await readFile(path, "utf8"), imported, { replace: options.get("replace") === "true" });
+  const checked = await writeCheckedConfig(document, originalText, {
+    configPath: path,
+    skillsRoot: skillsRoot(options),
+    dryRun: options.get("dry-run") === "true"
+  }, `Import merged: ${path}`);
   const result = {
-    message: `Import merged: ${path}`,
-    dryRun: options.get("dry-run") === "true",
-    changed: merged.changed,
-    plan: merged.plan,
+    ...checked,
     addedSkills: merged.addedSkills,
     addedInstallUnits: merged.addedInstallUnits,
     replacedSkills: merged.replacedSkills,
     replacedInstallUnits: merged.replacedInstallUnits
   };
-  if (result.changed && !result.dryRun) {
-    await writeFile(path, merged.text, "utf8");
-  }
   writeOutput(stdout, result, options, () => renderImportMerge(result));
   return 0;
 }
@@ -248,8 +257,43 @@ async function doctor(options, stdout) {
     skillsRoot: options.get("skills"),
     verifySources: options.get("verify") === "true"
   });
-  writeOutput(stdout, result, options, () => renderDoctor(result));
+  const summary = options.get("summary") === "true";
+  writeOutput(stdout, result, options, () => summary ? renderDoctorSummary(result) : renderDoctor(result));
   return (options.get("strict") === "true" ? result.strictOk : result.ok) ? 0 : 1;
+}
+
+async function applyActionCommand(argv, options, stdout, stderr) {
+  try {
+    const actionIds = positionalArgs(argv, APPLY_ACTION_VALUE_OPTIONS);
+    if (actionIds.length !== 1) {
+      throw new ApplyActionError(
+        actionIds.length === 0 ? "missing-action-id" : "multiple-action-ids",
+        "Usage: skillboard apply-action <action-id>; apply exactly one action at a time."
+      );
+    }
+    const [actionId] = actionIds;
+    const result = await applyAdvisorAction(actionId, {
+      root: commandRoot(options),
+      workflow: options.get("workflow"),
+      configPath: configPath(options),
+      skillsRoot: skillsRoot(options),
+      dryRun: options.get("dry-run") === "true",
+      yes: options.get("yes") === "true",
+      allowDestructive: options.get("allow-destructive") === "true",
+      hookOut: options.get("out"),
+      skillboardBin: options.get("skillboard-bin")
+    });
+    writeOutput(stdout, result, options, () => renderApplyAction(result));
+    return 0;
+  } catch (error) {
+    const payload = applyActionErrorPayload(error);
+    if (jsonRequested(options, argv)) {
+      stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    } else {
+      stderr.write(`${payload.error.message}\n`);
+    }
+    return 1;
+  }
 }
 
 async function list(argv, options, stdout) {
@@ -491,8 +535,16 @@ async function add(argv, options, stdout) {
 
 async function addWorkflowCommand(args, options, stdout) {
   const workflow = args[1];
-  const harness = options.get("harness");
+  let harness = options.get("harness");
   if (workflow === undefined || harness === undefined) {
+    if (workflow !== undefined && harness === undefined) {
+      const workspace = await loadWorkspace({ configPath: configPath(options), skillsRoot: skillsRoot(options) });
+      const available = workspace.harnesses.map((h) => h.name).sort();
+      const hint = available.length === 0
+        ? "No harnesses are configured yet. Add one with: skillboard add harness <name>"
+        : `Available harnesses: ${available.join(", ")}`;
+      throw new Error(`--harness is required for workflow "${workflow}".\n${hint}\n\nUsage: skillboard add workflow <workflow-name> --harness <harness-name> [--skill <id>[,<id>]] [--harness-status <status>] [--require-existing-harness] [--dry-run] [--json]`);
+    }
     throw new Error("Usage: skillboard add workflow <workflow-name> --harness <harness-name> --config <path> --skills <dir> [--skill <id>[,<id>]] [--harness-status <status>] [--require-existing-harness] [--dry-run] [--json]");
   }
   const result = await addWorkflow({
@@ -658,7 +710,16 @@ function configPath(options) {
 }
 
 function skillsRoot(options) {
-  return options.get("skills");
+  return options.get("skills") ?? "skills";
+}
+
+function commandRoot(options) {
+  const dir = options.get("dir");
+  if (dir !== undefined) {
+    return dir;
+  }
+  const config = options.get("config");
+  return config !== undefined && isAbsolute(config) ? dirname(config) : ".";
 }
 
 function parseOptions(args) {
@@ -767,7 +828,26 @@ function renderChangePlan(plan) {
   return `${lines.join("\n")}\n`;
 }
 
-function positionalArgs(args) {
+function renderApplyAction(result) {
+  if (result.mode === "preview") {
+    return [
+      `Preview action: ${result.action.id}`,
+      "Changed: false",
+      "Re-run with --yes to apply.",
+      ""
+    ].join("\n");
+  }
+  return [
+    `Applied action: ${result.action.id}`,
+    `Changed: ${result.changed}`,
+    "",
+    "Returned post-apply brief:",
+    "",
+    renderSkillBrief(result.brief)
+  ].join("\n");
+}
+
+function positionalArgs(args, valueOptions = null) {
   const values = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -776,11 +856,16 @@ function positionalArgs(args) {
       continue;
     }
     const value = args[index + 1];
-    if (value !== undefined && !value.startsWith("--")) {
+    const optionName = arg.slice(2);
+    if ((valueOptions === null || valueOptions.has(optionName)) && value !== undefined && !value.startsWith("--")) {
       index += 1;
     }
   }
   return values;
+}
+
+function jsonRequested(options, argv) {
+  return options.get("json") === "true" || argv.includes("--json");
 }
 
 function writeOutput(stdout, value, options, renderText) {
@@ -964,6 +1049,36 @@ function renderRollout(result) {
   return lines.join("\n");
 }
 
+function renderDoctorSummary(result) {
+  const status = result.ok ? result.reviewRequired ? "safe mode, review needed" : "passed" : "needs attention";
+  const lines = [
+    `SkillBoard doctor: ${status}`,
+    `Workspace: ${result.workspace.skills.declared} skills, ${result.workspace.workflows} workflows, ${result.workspace.harnesses} harnesses, ${result.workspace.installUnits.total} install units`,
+    `Source audit: ${result.sources.ok ? "passed" : "failed"} (${result.sources.errors.length} errors, ${result.sources.warnings.length} warnings, ${result.sources.blockingWarnings.length} blocking)`,
+    `Policy: ${result.policy.ok ? "passed" : "failed"} (${result.policy.errors.length} errors, ${result.policy.warnings.length} warnings)`
+  ];
+  const concerns = [
+    ...result.sources.blockingWarnings.slice(0, 3).map((w) => `Blocking: ${w}`),
+    ...result.sources.warnings.slice(0, 3).map((w) => `Warning: ${w}`),
+    ...result.policy.errors.slice(0, 3).map((e) => `Policy error: ${e}`),
+    ...result.policy.warnings.slice(0, 3).map((w) => `Policy warning: ${w}`)
+  ];
+  if (concerns.length > 0) {
+    lines.push("Top concerns:");
+    for (const concern of concerns) {
+      lines.push(`- ${concern}`);
+    }
+  }
+  if (result.recommendations.length > 0) {
+    lines.push("Recommendations:");
+    for (const recommendation of result.recommendations.slice(0, 3)) {
+      lines.push(`- ${recommendation}`);
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 function renderDoctor(result) {
   const bridges = result.bridges.map((bridge) => `${bridge.file}=${bridge.status}`).join(", ");
   const sourceMode = result.sources.verified ? "verified" : "audit";
@@ -1012,9 +1127,10 @@ function helpText() {
     "  inventory refresh [--dir <path>] [--config <path>] [--scan-root <dir>[,<dir>]] [--dry-run] [--json]",
     "  inventory detect --unit <id> --config <path> [--install-output <path>] [--config-file a,b] [--source <value>] [--kind <kind>] [--scope <scope>] [--dry-run] [--json]",
     "  sources refresh [--dir <path>] [--config <path>] [--unit <id>[,<id>]] [--cache-dir <dir>] [--dry-run] [--json]",
-    "  doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json]",
-    "  status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json]",
-    "  brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--json]",
+    "  doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--summary] [--json]",
+    "  status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--summary] [--json]",
+    "  brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]",
+    "  apply-action <action-id> [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--dry-run] [--yes] [--allow-destructive] [--json]",
     "  import --profile <id-or-path> --source-root <dir> [--profile-dirs a,b] [--out <path>]",
     "  import --profile <id-or-path> --source-root <dir> --config <path> --merge [--replace] [--dry-run]",
     "  scan --config <path>",
@@ -1039,6 +1155,13 @@ function helpText() {
     "  dashboard --config <path> --skills <dir> [--out <path>]",
     "  reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--out <path>]",
     "  impact disable <skill-id> --config <path> --skills <dir> [--out <path>]",
+    "",
+    "Approval loop:",
+    "  Run skillboard brief --json --config <path> --skills <dir> [--workflow <name>] [--include-actions].",
+    "  Pick one current action id from the brief and ask the user for confirmation.",
+    "  Apply with skillboard apply-action <action-id> --config <path> --skills <dir> [--workflow <name>] --yes --json.",
+    "  Read the returned post-apply brief, then run skillboard guard use before invocation.",
+    "  apply-action re-resolves current actions; do not use cached/stale ids, multiple actions, or raw action-card shell text as the primary apply path.",
     ""
   ].join("\n");
 }

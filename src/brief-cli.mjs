@@ -3,13 +3,14 @@ import { buildSkillBrief } from "./advisor.mjs";
 import { renderSkillBrief } from "./brief-renderer.mjs";
 
 export async function runBriefCommand(options, stdout, paths) {
+  const json = options.get("json") === "true";
   const result = await buildSkillBrief({
     root: briefRoot(options),
-    configPath: paths.configPath,
-    skillsRoot: paths.skillsRoot,
-    workflow: options.get("workflow"),
-    includeActions: options.get("include-actions") === "true"
-  });
+      configPath: paths.configPath,
+      skillsRoot: paths.skillsRoot,
+      workflow: options.get("workflow"),
+      includeActions: options.get("include-actions") === "true" || !json
+    });
   writeBriefOutput(stdout, result, options);
   return briefExitCode(result);
 }
@@ -35,5 +36,5 @@ function writeBriefOutput(stdout, result, options) {
     stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  stdout.write(renderSkillBrief(result));
+  stdout.write(renderSkillBrief(result, { verbose: options.get("verbose") === "true" }));
 }

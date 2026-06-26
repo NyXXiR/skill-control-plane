@@ -85,10 +85,11 @@ export function isCommandSourceReference(source) {
 }
 
 export function hasRuntimeComponents(unit) {
+  const components = unit.components ?? {};
   return ["mcp-server", "hook", "agent", "lsp"].includes(unit.kind)
-    || unit.components.commands.length > 0
-    || unit.components.hooks.length > 0
-    || unit.components.mcpServers.length > 0;
+    || components.commands?.length > 0
+    || components.hooks?.length > 0
+    || components.mcpServers?.length > 0;
 }
 
 export function isModelSelectableInvocation(invocation) {

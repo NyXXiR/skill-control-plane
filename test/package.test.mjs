@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 
@@ -10,7 +11,7 @@ const execFileAsync = promisify(execFile);
 test("package manifest excludes internal work artifacts from npm pack", async () => {
   const manifest = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 
-  assert.deepEqual(manifest.files, ["bin", "src", "docs", "examples", "profiles", "README.md", "LICENSE", "tsconfig.lsp.json"]);
+  assert.deepEqual(manifest.files, ["bin", "src", "docs", "examples", "profiles", "README.md", "CONTRIBUTING.md", "LICENSE", "tsconfig.lsp.json"]);
 });
 
 test("package manifest is publishable as the SkillBoard CLI", async () => {
@@ -18,8 +19,22 @@ test("package manifest is publishable as the SkillBoard CLI", async () => {
 
   assert.equal(manifest.name, "agent-skillboard");
   assert.equal(manifest.private, undefined);
-  assert.equal(manifest.bin.skillboard, "bin/skillboard.mjs");
+  assert.deepEqual(manifest.bin, {
+    skillboard: "bin/skillboard.mjs",
+    "agent-skillboard": "bin/skillboard.mjs"
+  });
   assert.equal(manifest.publishConfig.access, "public");
+  assert.deepEqual(manifest.repository, {
+    type: "git",
+    url: "git+https://github.com/NyXXiR/skillboard.git"
+  });
+  assert.deepEqual(manifest.bugs, {
+    url: "https://github.com/NyXXiR/skillboard/issues"
+  });
+  assert.equal(manifest.homepage, "https://github.com/NyXXiR/skillboard#readme");
+  for (const keyword of ["ai-agent", "skills", "codex", "claude-code", "policy"]) {
+    assert.ok(manifest.keywords.includes(keyword));
+  }
 });
 
 test("source-tree SkillBoard CLI entrypoint is executable for generated hooks", async () => {
@@ -61,3 +76,30 @@ test("npm pack dry-run includes public runtime files and excludes work artifacts
   assert.equal(paths.some((path) => path.startsWith("test/")), false);
   assert.equal(paths.includes("package-lock.json"), false);
 });
+
+test("packed package runs through npm exec one-command bootstrap surface", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "skillboard-npm-exec-test-"));
+  try {
+    const packResult = await execNpm(["pack", "--json", "--pack-destination", temp]);
+    const [pack] = JSON.parse(packResult.stdout);
+    const tarballPath = join(temp, pack.filename);
+    const help = await execNpm(["exec", "--yes", "--package", tarballPath, "--", "skillboard", "help"], { cwd: temp });
+    const npxAlias = await execNpm(["exec", "--yes", "--package", tarballPath, "--", "agent-skillboard", "help"], { cwd: temp });
+
+    assert.match(help.stdout, /SkillBoard - workflow-scoped agent skill policy/);
+    assert.match(help.stdout, /init \[--dir <path>\]/);
+    assert.match(npxAlias.stdout, /SkillBoard - workflow-scoped agent skill policy/);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+function execNpm(args, options = {}) {
+  if (process.env.npm_execpath === undefined) {
+    return execFileAsync(process.platform === "win32" ? "npm.cmd" : "npm", args, {
+      shell: process.platform === "win32",
+      ...options
+    });
+  }
+  return execFileAsync(process.execPath, [process.env.npm_execpath, ...args], options);
+}

@@ -2,6 +2,21 @@
   "name": "agent-skillboard",
   "version": "0.1.0",
   "description": "Policy and visibility layer for AI agent skills.",
+  "keywords": [
+    "ai-agent",
+    "skills",
+    "codex",
+    "claude-code",
+    "policy"
+  ],
+  "homepage": "https://github.com/NyXXiR/skillboard#readme",
+  "bugs": {
+    "url": "https://github.com/NyXXiR/skillboard/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NyXXiR/skillboard.git"
+  },
   "type": "module",
   "files": [
     "bin",
@@ -10,17 +25,21 @@
     "examples",
     "profiles",
     "README.md",
+    "CONTRIBUTING.md",
     "LICENSE",
     "tsconfig.lsp.json"
   ],
   "bin": {
-    "skillboard": "bin/skillboard.mjs"
+    "skillboard": "bin/skillboard.mjs",
+    "agent-skillboard": "bin/skillboard.mjs"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "test": "node --test",
+    "test:unit": "node --test test/advisor-brief-actions.test.mjs test/advisor-brief.test.mjs test/ecosystem-docs.test.mjs test/install-units.test.mjs test/package.test.mjs test/policy.test.mjs test/skillboard.test.mjs",
+    "test:integration": "node --test test/brief-cli.test.mjs test/cli.test.mjs test/control-exports.test.mjs test/first-time-ux.test.mjs test/hook-dry-run.test.mjs test/hook-install-cli.test.mjs test/hook-json-errors.test.mjs test/install-units.test.mjs test/lifecycle-cli.test.mjs test/lifecycle-reset-cli.test.mjs test/multi-source-integration.test.mjs test/package.test.mjs test/policy-hardening.test.mjs test/review-cli.test.mjs test/source-profiles.test.mjs",
     "diagnostics": "tsc -p tsconfig.lsp.json",
     "check": "node --check bin/skillboard.mjs && npm run diagnostics && node --test"
   },

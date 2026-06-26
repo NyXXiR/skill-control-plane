@@ -49,18 +49,22 @@ export async function doctorProject(options = {}) {
   }
 
   let workspace;
-  try {
-    workspace = await loadWorkspace({ configPath, skillsRoot });
-  } catch (error) {
-    return finalizeDoctor({
-      ...base,
-      config: {
-        exists: true,
-        valid: false,
-        version: null,
-        error: error instanceof Error ? error.message : String(error)
-      }
-    }, ["fix skillboard.config.yaml, then run skillboard check"]);
+  if (options.workspace !== undefined) {
+    workspace = options.workspace;
+  } else {
+    try {
+      workspace = await loadWorkspace({ configPath, skillsRoot });
+    } catch (error) {
+      return finalizeDoctor({
+        ...base,
+        config: {
+          exists: true,
+          valid: false,
+          version: null,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }, ["fix skillboard.config.yaml, then run skillboard check"]);
+    }
   }
 
   const policy = checkPolicy(workspace);

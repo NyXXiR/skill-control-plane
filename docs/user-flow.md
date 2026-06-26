@@ -12,21 +12,35 @@ skillboard doctor
 
 `init` creates the config, local `skills/` directory, report directories, and
 agent bridge blocks. It also scans known local agent skill locations and records
-discovered skills as managed entries. Trusted user-local skills are immediately
-attached to a generated manual workflow when the project has no workflows yet,
-so existing manual skills keep working through `can-use` and guard checks.
-Runtime-supplied or external skills are quarantined and blocked until a workflow
-explicitly enables them. Use `skillboard doctor --strict` when review-needed
-safe-mode warnings should fail automation.
+discovered skills as managed entries. Trusted user-local skills, including
+Hermes profile skills under `.hermes/profiles/*/skills`, are immediately
+attached to a generated manual workflow as `status: active` with
+`invocation: manual-only` when the project has no workflows yet, so existing
+manual skills keep working through `can-use` and guard checks without creating
+legacy-state warning noise. Runtime-supplied or external skills are quarantined
+until an explicit source and workflow decision exists. Reviewable items should
+appear as "Needs your decision"; only provenance failures, explicit user blocks,
+disabled sources, or other hard policy failures should remain "Blocked for
+safety". Use
+`skillboard doctor --strict` when review-needed safe-mode warnings should fail
+automation.
 
 When the user asks the agent what it can use, the agent should run
 `skillboard brief --json` first and answer from the brief rather than reading
 skill files directly. The user-facing text output uses sections such as "What
-your AI can use now", "Needs review", and "Blocked for safety";
-the JSON form gives agents the same facts plus optional action cards. Those
-action cards are suggestions only: the agent should request confirmation before
-applying risk-bearing changes, and after any mutating apply it should rerun
-`skillboard brief --json` before making the next availability claim.
+your AI can use now", "Needs your decision", and "Blocked for safety"; text
+briefs include previewable action cards by default, while the JSON form keeps
+action cards opt-in. For large skill sets, the default text brief stays compact:
+counts, top categories, next safe action, short previews per section, and short
+action summaries. Use `skillboard brief --verbose` when you need every skill and
+full copyable command details. Those action cards are suggestions only: the
+agent should pick one current action id from the brief, request confirmation
+before applying risk-bearing changes, then run
+`skillboard apply-action <action-id> --config skillboard.config.yaml --skills skills --yes --json`
+with `--workflow <name>` when a workflow is selected. The agent should read the
+returned post-apply brief before making the next availability claim.
+`apply-action` re-resolves the current brief and refuses stale action ids instead
+of replaying cached action-card shell text.
 
 Run this again after installing agent packages, plugins, workflow bundles, or
 harnesses:
@@ -78,8 +92,8 @@ skillboard add workflow daily-workflow \
 ```
 
 When `add workflow` attaches a `candidate` / `manual-only` skill, it promotes the
-skill to `active-manual` for that workflow. It still does not grant automatic
-model invocation.
+skill to `active` with `invocation: manual-only` for that workflow. It still
+does not grant automatic model invocation.
 
 ## 3. Inspect Influence Before Use
 
@@ -108,14 +122,23 @@ For an actual invocation, `brief` is not the final permission check. Agents
 should run `skillboard guard use ...` immediately before calling a skill so
 state changes made after the brief cannot slip through.
 
-When wiring a guard hook, preview the generated command first:
+When wiring a guard hook from an action card, keep `apply-action` as the
+action-card primary flow:
+
+```bash
+skillboard apply-action <action-id> --workflow daily-workflow --config skillboard.config.yaml --skills skills --yes --json
+```
+
+The raw hook commands are underlying manual operator detail for previewing and
+materializing an executable guard hook outside the action-card approval loop:
 
 ```bash
 skillboard hook install --workflow daily-workflow --config skillboard.config.yaml --skills skills --out .skillboard/hooks/daily-workflow-guard.sh --dry-run --json
 skillboard hook install --workflow daily-workflow --config skillboard.config.yaml --skills skills --out .skillboard/hooks/daily-workflow-guard.sh
 ```
 
-Inspect the JSON `planned.preview.shell` before applying the second command.
+For direct manual hook installation, inspect the JSON `planned.preview.shell`
+before an operator materializes the matching non-dry-run hook command.
 
 ## 4. Enable, Disable, Or Prefer
 

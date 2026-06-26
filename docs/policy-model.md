@@ -9,7 +9,8 @@ SkillBoard separates storage from invocation.
 - `discovered`: present in actual state but not yet classified.
 - `quarantined`: visible to the control plane but not callable.
 - `active`: allowed in at least one workflow.
-- `active-manual`: active only for direct user invocation.
+- `active` with `invocation: manual-only`: active only for direct user invocation.
+- `active-manual`: legacy spelling accepted for compatibility.
 - `active-router`: active only through a policy-checked router.
 - `active-auto`: active for workflow-scoped automatic invocation.
 - `candidate`: proposed for one or more workflows, pending approval.
@@ -81,9 +82,12 @@ explicit policy decision rather than installation.
 `skillboard brief --json` is the AI-facing availability contract. It lets an
 agent answer "What your AI can use now" with grouped facts from the control
 plane instead of trusting installed `SKILL.md` text or inventing policy from the
-filesystem. The brief may include action cards when requested, but an action
-card is only a suggestion. It does not authorize invocation and it does not make
-unreviewed external skills safe for automatic use.
+filesystem. Human brief text separates reviewable friction from hard blocks:
+"Needs your decision" means the user can make a source/skill/workflow decision
+once, while "Blocked for safety" means policy or provenance must change before
+the item is usable. The brief may include action cards when requested, but an
+action card is only a suggestion. It does not authorize invocation and it does
+not make unreviewed external skills safe for automatic use.
 
 Risk-bearing action cards require user confirmation before apply. Any apply
 that mutates policy, trust, hooks, reset state, or skill references makes the
@@ -234,13 +238,14 @@ SkillBoard compares desired state with actual state:
 
 Safe automatic defaults:
 
-- Trusted user-local skills become `active-manual` only when SkillBoard has no
-  existing workflow metadata and can create a local manual workflow.
+- Trusted user-local skills become `status: active` with
+  `invocation: manual-only` only when SkillBoard has no existing workflow
+  metadata and can create a local manual workflow.
 - Trusted user-local skills discovered after workflows exist become
   `candidate` / `manual-only` with a review note instead of being attached to an
   arbitrary workflow.
-- Runtime-supplied, external, system, or unreviewed skills are quarantined and
-  blocked.
+- Runtime-supplied, external, system, or unreviewed skills are quarantined from
+  automatic use and surfaced as decisions when a safe review path exists.
 - New harnesses detected by reconciliation are disabled until workflows opt in.
 - Removed skills and harnesses produce impact reports before config changes.
 - Capability matches are surfaced as recommendations, not auto-activation.

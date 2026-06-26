@@ -38,11 +38,14 @@ jobs:
           npm pack --dry-run --json > pack.json
           node -e 'const fs=require("fs"); const [pack]=JSON.parse(fs.readFileSync("pack.json","utf8")); const paths=pack.files.map((file)=>file.path); for (const required of ["bin/skillboard.mjs","src/doctor.mjs","src/source-cache.mjs","src/install-output-detector.mjs","docs/install.md"]) { if (!paths.includes(required)) throw new Error(`missing ${required}`); } for (const blocked of [".omo/","test/"]) { if (paths.some((path)=>path.startsWith(blocked))) throw new Error(`packed internal path ${blocked}`); }'
           tmp="$(mktemp -d)"
+          pack_tmp="$(mktemp -d)"
+          npm pack --json --pack-destination "$pack_tmp" > pack-real.json
+          tarball="$pack_tmp/$(node -e 'const fs=require("fs"); const [pack]=JSON.parse(fs.readFileSync("pack-real.json","utf8")); process.stdout.write(pack.filename);')"
           codex_home="$(mktemp -d)"
           mkdir -p "$codex_home/skills/smoke-skill"
           printf '%s\n' '---' 'name: Smoke Skill' 'description: CI inventory smoke' '---' > "$codex_home/skills/smoke-skill/SKILL.md"
-          node bin/skillboard.mjs help >/dev/null
-          node bin/skillboard.mjs init --dir "$tmp" --no-scan-installed
+          npm exec --yes --package "$tarball" -- skillboard help >/dev/null
+          npm exec --yes --package "$tarball" -- skillboard init --dir "$tmp" --no-scan-installed
           CODEX_HOME="$codex_home" node bin/skillboard.mjs inventory refresh --dir "$tmp" --dry-run
           CODEX_HOME="$codex_home" node bin/skillboard.mjs inventory refresh --dir "$tmp"
           grep -q 'smoke-skill' "$tmp/skillboard.config.yaml"

@@ -1,3 +1,9 @@
+import {
+  LEGACY_STATUSES,
+  TERMINAL_STATUSES,
+  validateSkillState
+} from "../skill-state-matrix.mjs";
+
 export const skillRules = [
   {
     id: "SKILL-STATUS-001",
@@ -88,26 +94,12 @@ export const skillRules = [
 
 function validateStatusInvocation(skill) {
   const diagnostics = [];
-  if (skill.status === "blocked" && skill.invocation !== "blocked") {
-    diagnostics.push(`Blocked skill ${skill.id} must use invocation: blocked.`);
+  const result = validateSkillState(skill.status, skill.invocation, skill.id);
+  if (result !== null) {
+    diagnostics.push(result);
   }
-  if (skill.status === "quarantined" && skill.invocation !== "blocked") {
-    diagnostics.push(`Quarantined skill ${skill.id} must use invocation: blocked.`);
-  }
-  if (skill.status === "deprecated" && !["deprecated", "blocked"].includes(skill.invocation)) {
-    diagnostics.push(`Deprecated skill ${skill.id} must use invocation: deprecated or blocked.`);
-  }
-  if (["active", "canonical"].includes(skill.status) && ["blocked", "deprecated"].includes(skill.invocation)) {
+  if (["active", "canonical"].includes(skill.status) && TERMINAL_STATUSES.has(skill.invocation)) {
     diagnostics.push(`Active skill ${skill.id} cannot use invocation: ${skill.invocation}.`);
-  }
-  if (skill.status === "active-manual" && skill.invocation !== "manual-only") {
-    diagnostics.push(`active-manual skill ${skill.id} must use invocation: manual-only.`);
-  }
-  if (skill.status === "active-router" && skill.invocation !== "router-only") {
-    diagnostics.push(`active-router skill ${skill.id} must use invocation: router-only.`);
-  }
-  if (skill.status === "active-auto" && skill.invocation !== "workflow-auto") {
-    diagnostics.push(`active-auto skill ${skill.id} must use invocation: workflow-auto.`);
   }
   return diagnostics;
 }

@@ -5,7 +5,30 @@ bundles, and local skill repositories.
 
 ## Install From npm
 
-After publishing:
+Use npm/npx when you want to bootstrap a project without keeping a global
+SkillBoard binary installed:
+
+```bash
+npx agent-skillboard init
+npx agent-skillboard doctor
+```
+
+In CI or scripts, use the explicit package/binary spelling:
+
+```bash
+npx --yes --package agent-skillboard skillboard init
+npx --yes --package agent-skillboard skillboard doctor
+```
+
+The equivalent `npm exec` spelling is explicit about the package and binary,
+which is useful in scripts and CI:
+
+```bash
+npm exec --yes --package agent-skillboard -- skillboard init
+npm exec --yes --package agent-skillboard -- skillboard doctor
+```
+
+For repeated local use, install the CLI globally:
 
 ```bash
 npm install -g agent-skillboard
@@ -22,9 +45,8 @@ The executable remains `skillboard` even though the npm package name is
 git clone <your-skillboard-repo-url>
 cd skillboard
 npm install
-npm link
-skillboard init --dir /path/to/your/project
-skillboard doctor --dir /path/to/your/project
+node bin/skillboard.mjs init --dir /path/to/your/project
+node bin/skillboard.mjs doctor --dir /path/to/your/project
 ```
 
 ## What init Does
@@ -48,12 +70,14 @@ The bridge block is marked with `BEGIN SKILLBOARD` / `END SKILLBOARD` and is
 idempotent. Running init again does not duplicate it.
 
 By default, init scans known local agent skill roots such as Codex user skills,
-Codex system skills, and Codex plugin-cache manifests. Trusted user-local skills
-are written as `active-manual` and attached to a generated local manual workflow
-when the project has no workflow metadata yet. That lets a first-time user keep
-their existing manual skills usable through `skillboard can-use` and guard
-checks without granting automatic model invocation. System, plugin, and other
-runtime-supplied skills are written with `status: quarantined` and
+Codex system skills, Codex plugin-cache manifests, Claude user skills, Hermes
+user skills, and Hermes profile skills under `.hermes/profiles/*/skills`.
+Trusted user-local skills are written as `status: active` with `invocation:
+manual-only` and attached to a generated local manual workflow when the project
+has no workflow metadata yet. That lets a first-time user keep their existing
+manual skills usable through `skillboard can-use` and guard checks without
+granting automatic model invocation or creating legacy-state warning noise.
+System, plugin, and other runtime-supplied skills are written with `status: quarantined` and
 `invocation: blocked`. Plugin hooks, MCP servers, commands, and modified config files are
 recorded on the owning install unit when manifest metadata exposes them, which
 lets policy checks flag high-risk runtime extensions without flattening them
@@ -78,17 +102,27 @@ report. `skillboard status` is the same report under a shorter command name.
 For AI-mediated use, the generated bridge tells agents to answer availability
 questions from `skillboard brief --json`, not from memory or from raw
 `SKILL.md` bodies. The brief is read-only and organizes the response around
-"What your AI can use now", review needs, safety blocks, inactive installed
-skills, and suggested action cards. Agents should still run
-`skillboard guard use ...` immediately before an actual skill invocation.
+"What your AI can use now", decisions the user can make once, hard safety
+blocks, inactive installed skills, and suggested action cards. Text briefs show
+action cards by default; JSON keeps them opt-in with `--include-actions`. The
+default text brief is compact for large skill sets: it keeps counts, top
+categories, the next safe action, short section previews, and short action
+summaries. Use `skillboard brief --verbose` when you need the full list or full
+copyable command details. Agents should still run `skillboard guard use ...`
+immediately before an actual skill invocation.
 
 Action cards are change suggestions. Before an agent applies one that changes
 policy, trust, hooks, reset state, or skill references, it should request user
-confirmation. After any mutating apply, it should rerun `skillboard brief --json`
-before answering another availability question or applying another action card.
-For hook action cards specifically, run `skillboard hook install ... --dry-run
---json` first and inspect the preview before applying the same command without
-the dry-run flags.
+confirmation for one current action id from the brief. After confirmation, it should run
+`skillboard apply-action <action-id> --config skillboard.config.yaml --skills skills --yes --json`
+with `--workflow <name>` when a workflow is selected. It should then read the
+returned post-apply brief before answering another availability question or
+applying another action card. `apply-action` re-resolves current action cards,
+so stale action ids and cached action-card shell text are not replayed.
+For hook action cards specifically, keep `apply-action` as the action-card
+primary flow. Raw `skillboard hook install ... --dry-run --json` previews and
+the matching non-dry-run command are underlying manual detail for operators who
+need to inspect or materialize an executable guard hook directly.
 
 After installing a new local agent skill pack, plugin, workflow bundle, or
 harness, rescan before enabling anything:
@@ -103,9 +137,10 @@ user-local skills are attached to a generated local manual workflow. If workflow
 already exist, those skills are imported as manual-only candidates with a review
 note instead of being attached to an arbitrary workflow. Runtime components
 remain attached to the owning install unit for review, and non-user runtime
-skills remain quarantined / blocked. Dry-run output includes a capped YAML
-semantic change list, while broken detector entries or malformed `SKILL.md`
-files are surfaced as scan warnings instead of aborting the whole refresh.
+skills stay out of automatic use until a source/workflow decision is recorded.
+Dry-run output includes a capped YAML semantic change list, while broken
+detector entries or malformed `SKILL.md` files are surfaced as scan warnings
+instead of aborting the whole refresh.
 
 Add a new workflow or harness without editing YAML by hand:
 
@@ -240,9 +275,10 @@ skillboard review install-unit github.mattpocock.skills \
   --skills skills
 ```
 
-Automatic invocation remains blocked for unreviewed non-user sources; reviewing
-the install unit makes later `activate --mode workflow-auto` checks explicit and
-auditable.
+Automatic invocation remains blocked for unreviewed non-user sources. The user
+experience should still be a one-time decision queue: review, trust, or block
+the install unit once, then revisit only when the source, skill, or workflow
+changes.
 
 ```yaml
 install_units:
