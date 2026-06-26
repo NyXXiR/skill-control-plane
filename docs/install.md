@@ -3,13 +3,31 @@
 SkillBoard sits one layer above skill installers, plugin marketplaces, harness
 bundles, and local skill repositories.
 
+## Install From A Clone
+
+The npm package is not published yet. Until the first publish, use a clone:
+
+```bash
+git clone https://github.com/NyXXiR/skillboard.git
+cd skillboard
+npm install
+node bin/skillboard.mjs init --dir /path/to/your/project
+node bin/skillboard.mjs brief --dir /path/to/your/project
+node bin/skillboard.mjs doctor --dir /path/to/your/project --summary
+```
+
+SkillBoard does not make installed skills automatically callable. It imports
+trusted local skills as manual-only and keeps runtime/plugin skills quarantined
+until reviewed.
+
 ## Install From npm
 
-Use npm/npx when you want to bootstrap a project without keeping a global
-SkillBoard binary installed:
+After the first npm publish, use npm/npx when you want to bootstrap a project
+without keeping a global SkillBoard binary installed:
 
 ```bash
 npx agent-skillboard init
+npx agent-skillboard brief
 npx agent-skillboard doctor
 ```
 
@@ -38,16 +56,6 @@ skillboard doctor
 
 The executable remains `skillboard` even though the npm package name is
 `agent-skillboard`.
-
-## Install From A Clone
-
-```bash
-git clone <your-skillboard-repo-url>
-cd skillboard
-npm install
-node bin/skillboard.mjs init --dir /path/to/your/project
-node bin/skillboard.mjs doctor --dir /path/to/your/project
-```
 
 ## What init Does
 

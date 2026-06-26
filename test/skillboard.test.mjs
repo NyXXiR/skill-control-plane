@@ -8,6 +8,18 @@ import {
 } from "../src/index.mjs";
 import { withFixture } from "./fixtures.mjs";
 
+function testAgentEnv(home, overrides = {}) {
+  return {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: `${home}/.codex`,
+    HERMES_HOME: `${home}/.hermes`,
+    CLAUDE_HOME: `${home}/.claude`,
+    SKILLBOARD_INIT_SCAN_ROOTS: "",
+    ...overrides
+  };
+}
+
 test("dashboard shows workflow-scoped active and blocked skills", async () => {
   await withFixture(async ({ configPath, skillsRoot }) => {
     const workspace = await loadWorkspace({ configPath, skillsRoot });
@@ -141,7 +153,7 @@ test("agent inventory accepts injected detector registry entries", async () => {
     const sourceRoot = join(root, "custom-source");
     await mkdir(sourceRoot, { recursive: true });
     const inventory = await discoverAgentSkillInventory({
-      env: { SKILLBOARD_INIT_SCAN_ROOTS: "" },
+      env: testAgentEnv(root),
       home: root,
       roots: [sourceRoot],
       detectors: [
@@ -194,7 +206,7 @@ test("agent inventory uses HOME env when rendering discovered paths", async () =
     await writeFile(join(skillsRoot, "bad", "SKILL.md"), "# missing frontmatter\n", "utf8");
 
     const inventory = await discoverAgentSkillInventory({
-      env: { HOME: home, CODEX_HOME: join(home, ".codex"), SKILLBOARD_INIT_SCAN_ROOTS: "" },
+      env: testAgentEnv(home, { CODEX_HOME: join(home, ".codex") }),
       roots: [skillsRoot]
     });
 
@@ -214,7 +226,7 @@ test("agent inventory isolates detector and skill parse failures as warnings", a
     const throwingRoot = join(root, "throwing-source");
     await mkdir(throwingRoot, { recursive: true });
     const throwingInventory = await discoverAgentSkillInventory({
-      env: { SKILLBOARD_INIT_SCAN_ROOTS: "" },
+      env: testAgentEnv(root),
       home: root,
       roots: [throwingRoot],
       detectors: [
@@ -239,7 +251,7 @@ test("agent inventory isolates detector and skill parse failures as warnings", a
     await mkdir(join(skillsRoot, "good"), { recursive: true });
     await writeFile(join(skillsRoot, "good", "SKILL.md"), "---\nname: good\n---\n# Good\n", "utf8");
     const parsedInventory = await discoverAgentSkillInventory({
-      env: { SKILLBOARD_INIT_SCAN_ROOTS: "" },
+      env: testAgentEnv(root),
       home: root,
       roots: [skillsRoot]
     });

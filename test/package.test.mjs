@@ -72,6 +72,7 @@ test("npm pack dry-run includes public runtime files and excludes work artifacts
   assert.ok(paths.includes("src/install-output-detector.mjs"));
   assert.ok(paths.includes("docs/install.md"));
   assert.ok(paths.includes("docs/rollout-runbook.md"));
+  assert.equal(paths.includes("skillboard.png"), false);
   assert.equal(paths.some((path) => path.startsWith(".omo/")), false);
   assert.equal(paths.some((path) => path.startsWith("test/")), false);
   assert.equal(paths.includes("package-lock.json"), false);

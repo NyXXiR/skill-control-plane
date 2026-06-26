@@ -15,6 +15,10 @@ active pool, automatic invocation is denied by default, and the reconciler turns
 skill or harness drift into safe defaults plus a short list of decisions that
 actually need user approval.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NyXXiR/skillboard/main/skillboard.png" alt="SkillBoard architecture diagram: sources, inventory scanner, SkillBoard model, policy engine, and user and agent surfaces." width="100%">
+</p>
+
 ## The Problem
 
 You installed a few agent skill packs.
@@ -113,15 +117,34 @@ This repository is an early CLI-first foundation. It currently supports:
 
 ## Quick Start
 
-Bootstrap a project with one npm/npx command, without installing a global
-binary:
+npm package is not published yet. For now, run SkillBoard from a clone:
+
+```bash
+git clone https://github.com/NyXXiR/skillboard.git
+cd skillboard
+npm install
+node bin/skillboard.mjs init --dir /path/to/your/project
+node bin/skillboard.mjs brief --dir /path/to/your/project
+node bin/skillboard.mjs doctor --dir /path/to/your/project --summary
+```
+
+The `--dir` value is the project you want SkillBoard to manage. If you omit it,
+SkillBoard initializes the current directory.
+
+SkillBoard does not make installed skills automatically callable. It imports
+trusted local skills as manual-only and keeps runtime/plugin skills quarantined
+until reviewed.
+
+After the first npm publish, the short path will be:
 
 ```bash
 npx agent-skillboard init
+npx agent-skillboard brief
+npx agent-skillboard doctor --summary
 ```
 
-In CI or scripts, the explicit package form avoids any ambiguity about the
-binary name:
+In CI or scripts after publish, the explicit package form avoids any ambiguity
+about the binary name:
 
 ```bash
 npx --yes --package agent-skillboard skillboard init
@@ -139,7 +162,7 @@ Then check the project:
 npx --yes --package agent-skillboard skillboard doctor
 ```
 
-For repeated local use, install the CLI globally:
+For repeated local use after publish, install the CLI globally:
 
 ```bash
 npm install -g agent-skillboard
@@ -209,6 +232,21 @@ The default text brief is compact for large skill sets: it keeps the summary,
 top categories, next safe action, short section previews, and short action
 summaries. Use `skillboard brief --verbose` when you need the full list or
 full copyable command details.
+
+Example: overloaded local agent profile
+
+```text
+Scanned installed agent skills: 128
+AI can use now: 123 (0 automatic, 123 manual)
+Needs your decision: 0
+Blocked for safety: 5
+Default brief: 54 lines
+Verbose inventory: 244 lines
+```
+
+The point is not to install more skills. The point is to see that installed
+does not mean automatically callable, local skills stay manual-only, and risky
+runtime/plugin skills stay blocked until reviewed.
 
 Run `skillboard doctor` after init to see config health, bridge status, managed
 skill/install-unit counts, policy/source audit summaries, and the default

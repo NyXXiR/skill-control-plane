@@ -190,6 +190,9 @@ test("brief actions hook install is a dry-run-backed command suggestion only", a
     const [action] = actionsByKind(brief, "hook-install");
 
     assert.ok(action);
+    assert.equal(action.label, "Preview guard hook install for agent");
+    assert.match(action.reason, /Preview/);
+    assert.match(action.reason, /no files will be changed/i);
     assertCommandObject(action.dry_run);
     assertCommandObject(action.apply);
     assertApplicationCommandObject(action.application.preview, action.id);

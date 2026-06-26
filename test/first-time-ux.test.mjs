@@ -11,6 +11,18 @@ const execFileAsync = promisify(execFile);
 
 const BIN = join(process.cwd(), "bin", "skillboard.mjs");
 
+function testAgentEnv(home, overrides = {}) {
+  return {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: join(home, ".codex"),
+    HERMES_HOME: join(home, ".hermes"),
+    CLAUDE_HOME: join(home, ".claude"),
+    SKILLBOARD_INIT_SCAN_ROOTS: "",
+    ...overrides
+  };
+}
+
 async function makeInitializedProject() {
   const root = await mkdtemp(join(tmpdir(), "skillboard-ux-test-"));
   await execFileAsync(process.execPath, [BIN, "init", "--dir", root, "--no-scan-installed"]);
@@ -96,6 +108,157 @@ test("doctor --summary prints compact status", async () => {
   }
 });
 
+test("init summarizes large installed skill scans instead of printing the whole inventory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-compact-output-"));
+  try {
+    const home = join(root, "home");
+    const project = join(root, "project");
+    const hermesSkills = join(home, ".hermes", "profiles", "codex", "skills");
+    for (let index = 1; index <= 12; index += 1) {
+      const skillId = `skill-${String(index).padStart(2, "0")}`;
+      await writeSkill(join(hermesSkills, skillId), skillId);
+    }
+
+    const init = await execFileAsync(process.execPath, [BIN, "init", "--dir", project], {
+      env: testAgentEnv(home)
+    });
+
+    assert.match(init.stdout, /Initialized SkillBoard:/);
+    assert.match(init.stdout, /Scanned installed agent skills: 12/);
+    assert.match(init.stdout, /Managed install units: 1/);
+    assert.match(init.stdout, /Added workflows: `hermes-codex-local-manual`/);
+    assert.match(init.stdout, /Added harnesses: `hermes`/);
+    assert.match(init.stdout, /Added managed skills: 12/);
+    assert.match(init.stdout, /- `skill-01`/);
+    assert.match(init.stdout, /- `skill-05`/);
+    assert.match(init.stdout, /- \.\.\. 7 more/);
+    assert.doesNotMatch(init.stdout, /skill-12`/);
+    assert.match(init.stdout, /Safety default:/);
+    assert.match(init.stdout, /No automatic model invocation was enabled/);
+    assert.match(init.stdout, /12 manual-only skills available/);
+    assert.match(init.stdout, /Next:/);
+    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs doctor --dir ${project} --summary`));
+    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project}`));
+    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project} --verbose`));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init safety summary does not parse local SKILL.md files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-bad-local-skill-"));
+  try {
+    const badSkill = join(root, "skills", "bad");
+    await mkdir(badSkill, { recursive: true });
+    await writeFile(join(badSkill, "SKILL.md"), "# missing frontmatter\n", "utf8");
+
+    const init = await execFileAsync(process.execPath, [BIN, "init", "--dir", root, "--no-scan-installed"]);
+
+    assert.match(init.stdout, /Initialized SkillBoard:/);
+    assert.match(init.stdout, /Safety default:/);
+    assert.match(init.stdout, /0 automatic skills enabled/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init safety summary counts router-only skills separately", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-router-summary-"));
+  try {
+    await writeFile(
+      join(root, "skillboard.config.yaml"),
+      `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  router.helper:
+    path: router-helper
+    status: active
+    invocation: router-only
+    exposure: exported
+capabilities: {}
+harnesses: {}
+workflows: {}
+install_units: {}
+`,
+      "utf8"
+    );
+
+    const init = await execFileAsync(process.execPath, [BIN, "init", "--dir", root, "--no-scan-installed"]);
+
+    assert.match(init.stdout, /Safety default:/);
+    assert.match(init.stdout, /0 manual-only skills available/);
+    assert.match(init.stdout, /1 router-only skills available/);
+    assert.match(init.stdout, /0 blocked\/quarantined for safety/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init safety summary counts policy-valid legacy and canonical callable states", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-policy-summary-"));
+  try {
+    const skills = {
+      "legacy.manual": { path: "legacy-manual", status: "active-manual", invocation: "manual-only", exposure: "exported" },
+      "active.manual": { path: "active-manual", status: "active", invocation: "manual-only", exposure: "exported" },
+      "legacy.router": { path: "legacy-router", status: "active-router", invocation: "router-only", exposure: "exported" },
+      "legacy.auto": { path: "legacy-auto", status: "active-auto", invocation: "workflow-auto", exposure: "exported" },
+      "canonical.workflow": { path: "canonical-workflow", status: "canonical", invocation: "workflow-auto", exposure: "exported" },
+      "canonical.global": { path: "canonical-global", status: "canonical", invocation: "global-auto", exposure: "global-meta" },
+      "quarantined.blocked": { path: "quarantined-blocked", status: "quarantined", invocation: "blocked", exposure: "exported" },
+      "deprecated.removed": { path: "deprecated-removed", status: "deprecated", invocation: "deprecated", exposure: "exported" }
+    };
+    for (const [id, skill] of Object.entries(skills)) {
+      await writeSkill(join(root, "skills", skill.path), id);
+    }
+    await writeFile(
+      join(root, "skillboard.config.yaml"),
+      `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+${Object.entries(skills).map(([id, skill]) => `  ${id}:
+    path: ${skill.path}
+    status: ${skill.status}
+    invocation: ${skill.invocation}
+    exposure: ${skill.exposure}`).join("\n")}
+capabilities: {}
+harnesses:
+  codex:
+    status: configured
+    workflows:
+    - daily
+workflows:
+  daily:
+    harness: codex
+    active_skills:
+    - legacy.auto
+    - canonical.workflow
+    blocked_skills: []
+    required_capabilities: {}
+install_units: {}
+`,
+      "utf8"
+    );
+
+    const check = await execFileAsync(process.execPath, [BIN, "check", "--config", join(root, "skillboard.config.yaml"), "--skills", join(root, "skills")]);
+    const init = await execFileAsync(process.execPath, [BIN, "init", "--dir", root, "--no-scan-installed"]);
+
+    assert.match(check.stdout, /Policy check passed/);
+    assert.match(init.stdout, /Safety default:/);
+    assert.match(init.stdout, /3 automatic skills enabled/);
+    assert.match(init.stdout, /2 manual-only skills available/);
+    assert.match(init.stdout, /1 router-only skills available/);
+    assert.match(init.stdout, /2 blocked\/quarantined for safety/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("commands default --skills to skills/ in cwd", async () => {
   const project = await makeInitializedProject();
   try {
@@ -108,3 +271,18 @@ test("commands default --skills to skills/ in cwd", async () => {
     await project.cleanup();
   }
 });
+
+async function writeSkill(root, name) {
+  await mkdir(root, { recursive: true });
+  await writeFile(
+    join(root, "SKILL.md"),
+    `---
+name: ${name}
+description: Test skill ${name}.
+---
+
+# ${name}
+`,
+    "utf8"
+  );
+}

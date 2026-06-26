@@ -1,5 +1,8 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import YAML from "yaml";
+import { NON_CALLABLE_WORKFLOW_INVOCATIONS, NON_CALLABLE_WORKFLOW_STATUSES } from "./domain/constants.mjs";
+import { isValidSkillState } from "./domain/skill-state-matrix.mjs";
 import { refreshAgentInventory } from "./inventory-refresh.mjs";
 import { BRIDGE_START, bridgeBlock, defaultConfig, hookReadme, profileReadme } from "./lifecycle-content.mjs";
 
@@ -49,10 +52,12 @@ export async function initProject(options) {
   if (scan.changed && !configCreated) {
     updated.push("skillboard.config.yaml");
   }
+  const safety = await summarizeSafety(configPath);
   return {
     created,
     updated,
     scan,
+    safety,
     alreadyInitialized: created.length === 0 && updated.length === 0 && !scan.changed
   };
 }
@@ -97,4 +102,35 @@ async function mergeInstalledAgentSkills(configPath, options) {
     reviewNotes: result.scan.reviewNotes,
     warnings: result.scan.warnings
   };
+}
+
+async function summarizeSafety(configPath) {
+  const config = YAML.parse(await readFile(configPath, "utf8")) ?? {};
+  const skills = config.skills && typeof config.skills === "object" ? Object.values(config.skills) : [];
+  let automatic = 0;
+  let manualOnly = 0;
+  let routerOnly = 0;
+  let blocked = 0;
+  for (const rawSkill of skills) {
+    const skill = rawSkill && typeof rawSkill === "object" ? rawSkill : {};
+    const status = typeof skill.status === "string" ? skill.status : "vendor";
+    const invocation = typeof skill.invocation === "string" ? skill.invocation : "manual-only";
+    if (NON_CALLABLE_WORKFLOW_STATUSES.has(status) || NON_CALLABLE_WORKFLOW_INVOCATIONS.has(invocation)) {
+      blocked += 1;
+      continue;
+    }
+    if (!isValidSkillState(status, invocation)) {
+      continue;
+    }
+    if (["workflow-auto", "global-auto"].includes(invocation)) {
+      automatic += 1;
+    }
+    if (invocation === "manual-only") {
+      manualOnly += 1;
+    }
+    if (invocation === "router-only") {
+      routerOnly += 1;
+    }
+  }
+  return { automatic, manualOnly, routerOnly, blocked };
 }

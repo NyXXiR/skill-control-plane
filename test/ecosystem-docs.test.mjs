@@ -57,15 +57,28 @@ test("README distinguishes global and source-tree command forms", async () => {
   assert.match(text, /replace `skillboard ` with `node bin\/skillboard\.mjs `/);
 });
 
-test("README and install docs teach one-command npm exec bootstrap", async () => {
+test("README shows the architecture diagram from a GitHub-hosted asset", async () => {
+  const text = await readFile(resolve("README.md"), "utf8");
+
+  assert.match(text, /SkillBoard architecture diagram/);
+  assert.match(text, /https:\/\/raw\.githubusercontent\.com\/NyXXiR\/skillboard\/main\/skillboard\.png/);
+});
+
+test("README and install docs keep clone quick start until first npm publish", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
   const install = await readFile(resolve("docs/install.md"), "utf8");
 
-  for (const text of [readme, install]) {
-    assert.match(text, /npx agent-skillboard init/);
-    assert.match(text, /npx --yes --package agent-skillboard skillboard init/);
-    assert.match(text, /npm exec --yes --package agent-skillboard -- skillboard init/);
-  }
+  assert.match(readme, /npm package is not published yet/i);
+  assert.match(readme, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
+  assert.match(readme, /node bin\/skillboard\.mjs init --dir \/path\/to\/your\/project/);
+  assert.match(readme, /node bin\/skillboard\.mjs brief --dir \/path\/to\/your\/project/);
+  assert.match(readme, /node bin\/skillboard\.mjs doctor --dir \/path\/to\/your\/project --summary/);
+  assert.match(readme, /If you omit it,\s*SkillBoard initializes the current directory/);
+
+  assert.match(install, /After the first npm publish/i);
+  assert.match(install, /npx agent-skillboard init/);
+  assert.match(install, /npx --yes --package agent-skillboard skillboard init/);
+  assert.match(install, /npm exec --yes --package agent-skillboard -- skillboard init/);
 });
 
 test("project dogfoods AGENTS.md and CLAUDE.md bridge files", async () => {

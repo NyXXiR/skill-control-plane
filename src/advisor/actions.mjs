@@ -152,8 +152,8 @@ function hookInstallActions({ paths, workflow }) {
   return [makeAction({
     kind: "hook-install",
     targetId: `guard:${workflow.selected}`,
-    label: `Install guard hook for ${workflow.selected}`,
-    reason: "Preview and install the workflow guard hook.",
+    label: `Preview guard hook install for ${workflow.selected}`,
+    reason: "Preview the workflow guard hook install; no files will be changed until you apply it.",
     risk: "high",
     dryRun,
     apply: applyOrNull(workflow, dryRun, [

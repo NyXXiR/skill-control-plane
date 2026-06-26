@@ -8,6 +8,18 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+function testAgentEnv(home, overrides = {}) {
+  return {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: join(home, ".codex"),
+    HERMES_HOME: join(home, ".hermes"),
+    CLAUDE_HOME: join(home, ".claude"),
+    SKILLBOARD_INIT_SCAN_ROOTS: "",
+    ...overrides
+  };
+}
+
 async function execHookScript(path, args) {
   if (process.platform === "win32") {
     return await execFileAsync("bash", [path, ...args]);
@@ -1084,7 +1096,7 @@ test("cli init scans installed local user skills into manual workflow state", as
     await writeFile(join(pluginRoot, "hooks", "pre-tool-use-demo.json"), "{}", "utf8");
     await writeSkill(join(pluginRoot, "skills", "review"), "review");
 
-    const env = { ...process.env, HOME: home, CODEX_HOME: codexHome, SKILLBOARD_INIT_SCAN_ROOTS: "" };
+    const env = testAgentEnv(home, { CODEX_HOME: codexHome });
     const init = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "init", "--dir", project], { env });
     const configPath = join(project, "skillboard.config.yaml");
     const config = await readFile(configPath, "utf8");
@@ -1123,6 +1135,18 @@ test("cli init scans installed local user skills into manual workflow state", as
     assert.match(init.stdout, /Managed install units: 3/);
     assert.match(init.stdout, /Added workflows: `codex-local-manual`/);
     assert.match(init.stdout, /Added harnesses: `codex`/);
+    assert.match(init.stdout, /Added managed skills: 3/);
+    assert.match(init.stdout, /- `local-helper`/);
+    assert.match(init.stdout, /Safety default:/);
+    assert.match(init.stdout, /No automatic model invocation was enabled/);
+    assert.match(init.stdout, /Imported local skills are manual-only/);
+    assert.match(init.stdout, /Runtime\/plugin\/system skills are quarantined until reviewed/);
+    assert.match(init.stdout, /automatic skills enabled/);
+    assert.match(init.stdout, /manual-only skills available/);
+    assert.match(init.stdout, /blocked\/quarantined for safety/);
+    assert.match(init.stdout, /Next:/);
+    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs doctor --dir ${project} --summary`));
+    assert.ok(init.stdout.includes(`- node bin/skillboard.mjs brief --dir ${project}`));
     assert.match(config, /system-helper:/);
     assert.match(config, /local-helper:/);
     assert.match(config, /demo:review:/);
@@ -1160,7 +1184,7 @@ test("cli inventory refresh rescans installed skills and supports dry-run", asyn
     await writeSkill(join(codexHome, "skills", "local-helper"), "local-helper");
     await mkdir(join(codexHome, "skills", "broken-helper"), { recursive: true });
     await writeFile(join(codexHome, "skills", "broken-helper", "SKILL.md"), "# missing frontmatter\n", "utf8");
-    const env = { ...process.env, HOME: home, CODEX_HOME: codexHome, SKILLBOARD_INIT_SCAN_ROOTS: "" };
+    const env = testAgentEnv(home, { CODEX_HOME: codexHome });
     await execFileAsync(process.execPath, ["bin/skillboard.mjs", "init", "--dir", project, "--no-scan-installed"], { env });
     const before = await readFile(join(project, "skillboard.config.yaml"), "utf8");
 
@@ -1219,7 +1243,7 @@ test("cli init scans Hermes profile skills into canonical manual workflow state"
     await writeSkill(join(hermesHome, "profiles", "codex", "skills", "apple-notes"), "apple-notes");
     await writeSkill(join(hermesHome, "profiles", "codex", "skills", "software", "review"), "software-review");
 
-    const env = { ...process.env, HOME: home, HERMES_HOME: hermesHome, SKILLBOARD_INIT_SCAN_ROOTS: "" };
+    const env = testAgentEnv(home, { HERMES_HOME: hermesHome });
     const init = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "init", "--dir", project], { env });
     const configPath = join(project, "skillboard.config.yaml");
     const config = await readFile(configPath, "utf8");
@@ -1279,7 +1303,7 @@ install_units: {}
 `,
       "utf8"
     );
-    const env = { ...process.env, HOME: home, CODEX_HOME: codexHome, SKILLBOARD_INIT_SCAN_ROOTS: "" };
+    const env = testAgentEnv(home, { CODEX_HOME: codexHome });
     const refresh = await execFileAsync(process.execPath, [
       "bin/skillboard.mjs",
       "inventory",
