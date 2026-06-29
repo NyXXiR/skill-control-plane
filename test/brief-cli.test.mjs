@@ -65,6 +65,68 @@ test("brief command treats reviewable source friction as a decision queue, not h
   });
 });
 
+test("brief command surfaces policy errors above skill lists", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-brief-policy-health-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "broken-helper"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "broken-helper", "SKILL.md"),
+      "---\nname: broken-helper\ndescription: Broken helper.\n---\n# broken-helper\n",
+      "utf8"
+    );
+    await writeFile(
+      configPath,
+      `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  user.broken:
+    path: broken-helper
+    status: active
+    invocation: blocked
+    exposure: exported
+    category: user
+capabilities: {}
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - user.broken
+    blocked_skills: []
+install_units: {}
+`,
+      "utf8"
+    );
+
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow"
+    ]);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /## Policy health/);
+    assert.match(result.stdout, /Policy errors: 3/);
+    assert.match(result.stdout, /Active skill user\.broken cannot use invocation: blocked/);
+    assert.match(result.stdout, /Workflow daily-workflow activates non-callable skill user\.broken with invocation: blocked/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("brief command defaults to compact output for large manual skill sets", async () => {
   const root = await mkdtemp(join(tmpdir(), "skillboard-brief-compact-cli-"));
   try {

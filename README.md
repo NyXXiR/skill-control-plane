@@ -15,6 +15,22 @@ active pool, automatic invocation is denied by default, and the reconciler turns
 skill or harness drift into safe defaults plus a short list of decisions that
 actually need user approval.
 
+## Why Not Just List `/skills`?
+
+A skill list answers what is declared. SkillBoard answers what can safely run
+now.
+
+Same fixture, different answer:
+
+| Raw skill list | SkillBoard brief |
+| --- | --- |
+| `matt.tdd active workflow-auto` | `AI can use now: 0` |
+| no policy health | `Blocked for safety: 8`, `Policy errors: 2` |
+
+That gap is the product: before an agent invokes anything, SkillBoard turns a
+directory of installed skills into a checked availability decision. See
+[Tested Value Proof](#tested-value-proof) for the reproducible CLI test.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/NyXXiR/skillboard/main/skillboard.png" alt="SkillBoard architecture diagram: sources, inventory scanner, SkillBoard model, policy engine, and user and agent surfaces." width="100%">
 </p>
@@ -70,6 +86,34 @@ Example dashboard output:
 - quarantine new skills until a workflow explicitly opts in
 - report workflows affected before a skill or harness is disabled
 ```
+
+## Tested Value Proof
+
+A raw list says `matt.tdd` is active. SkillBoard says the workflow has 0 usable
+skills.
+
+That is the difference between an inventory and a control plane.
+
+| Question | Raw list | SkillBoard brief |
+| --- | --- | --- |
+| Does the workflow mention skills? | 4 workflow-linked rows | yes, but none are usable |
+| Does `matt.tdd` look enabled? | `active`, `workflow-auto` | blocked by failing policy health |
+| Can the agent safely use anything now? | not answered | 0 usable skills, 8 blocked skills |
+| Why? | not answered | `Policy errors: 2`, `Policy warnings: 1` |
+
+The action-card flow is tested too. Applying
+`activate-skill:anthropic.docx` in a temporary project changes the next brief
+from 2 usable skills to 3 and moves `anthropic.docx` into the manual-allowed
+set. SkillBoard applies one approved change, then re-resolves the next state.
+
+Run the proof with:
+
+```bash
+node --test test/readme-value-proof.test.mjs
+```
+
+See the [full reproducible proof](docs/value-proof.md) for the exact commands,
+fixtures, and assertions.
 
 ## Why This Exists
 

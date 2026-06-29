@@ -20,6 +20,7 @@ const CLEANUP_ACTION_KINDS = new Set([
 ]);
 const COMPACT_SKILL_LIMIT = 5;
 const TOP_CATEGORY_LIMIT = 5;
+const POLICY_DIAGNOSTIC_LIMIT = 3;
 const MAX_ACTIONS_PER_TEXT_SECTION = 5;
 const ACTION_KIND_RANK = new Map([
   ["setup-guidance", 0],
@@ -48,6 +49,7 @@ export function renderSkillBrief(brief, options = {}) {
   if (brief.error !== undefined) {
     lines.push(`Error: ${safeText(brief.error.message)}`, "");
   }
+  emitPolicyHealth(lines, brief);
   emitCategorySummary(lines, brief);
   emitNextAction(lines, brief, { verbose });
   for (const [title, key] of SKILL_SECTIONS) {
@@ -67,6 +69,46 @@ export function renderSkillBrief(brief, options = {}) {
   });
   emitActions(lines, brief, { verbose });
   return `${lines.join("\n")}\n`;
+}
+
+function emitPolicyHealth(lines, brief) {
+  const policy = brief.health?.policy;
+  if (policy === undefined) {
+    return;
+  }
+  const errors = policy.errors ?? [];
+  const warnings = policy.warnings ?? [];
+  if (errors.length === 0 && warnings.length === 0) {
+    return;
+  }
+  lines.push("## Policy health", "");
+  emitPolicyDiagnostics(lines, "Policy errors", errors);
+  emitPolicyDiagnostics(lines, "Policy warnings", warnings);
+  lines.push(`- check with: ${code(policyCheckCommand(brief), Number.POSITIVE_INFINITY)}`);
+  lines.push("");
+}
+
+function emitPolicyDiagnostics(lines, label, diagnostics) {
+  if (diagnostics.length === 0) {
+    return;
+  }
+  lines.push(`- ${label}: ${diagnostics.length}`);
+  for (const diagnostic of diagnostics.slice(0, POLICY_DIAGNOSTIC_LIMIT)) {
+    lines.push(`  - ${safeText(diagnostic)}`);
+  }
+  const hidden = diagnostics.length - POLICY_DIAGNOSTIC_LIMIT;
+  if (hidden > 0) {
+    lines.push(`  - ${hidden} more hidden. Run ${code("skillboard check")}.`);
+  }
+}
+
+function policyCheckCommand(brief) {
+  const config = brief.health?.config_path;
+  const skills = brief.health?.skills_root;
+  if (config === undefined || skills === undefined) {
+    return "skillboard check";
+  }
+  return `skillboard check --config ${config} --skills ${skills}`;
 }
 
 function briefCounts(brief) {
