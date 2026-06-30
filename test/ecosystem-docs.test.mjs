@@ -53,9 +53,10 @@ test("docs document manual variant lifecycle without promising conversion", asyn
   const readme = await readFile(resolve("README.md"), "utf8");
   const capabilities = await readFile(resolve("docs/capabilities.md"), "utf8");
   const policy = await readFile(resolve("docs/policy-model.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
   const guide = await readFile(resolve("docs/variant-lifecycle.md"), "utf8");
   const bridge = await readFile(resolve("src/lifecycle-content.mjs"), "utf8");
-  const combined = `${readme}\n${capabilities}\n${policy}\n${guide}\n${bridge}`;
+  const combined = `${readme}\n${capabilities}\n${policy}\n${reference}\n${guide}\n${bridge}`;
 
   assert.match(combined, /skillboard variant add/);
   assert.match(combined, /skillboard variant fork <variant-id>/);
@@ -70,8 +71,9 @@ test("docs document manual variant lifecycle without promising conversion", asyn
   assert.match(guide, /base:\n\s+content_digest: sha256:\.\.\.\n\s+snapshot: \.skillboard\/variant-snapshots\/claude\.a\/base\.md/);
   assert.match(guide, /approved:\n\s+content_digest: sha256:\.\.\.\n\s+snapshot: \.skillboard\/variant-snapshots\/claude\.a\/approved\.md/);
   assert.match(guide, /created lazily/);
-  assert.match(readme, /\[--category <name>\] \[--owner-install-unit <unit-id>\]/);
+  assert.match(reference, /\[--category <name>\] \[--owner-install-unit <unit-id>\]/);
   assert.match(guide, /\[--category <name>\] \[--owner-install-unit <unit-id>\]/);
+  assert.match(readme, /\[Skill variant lifecycle\]\(docs\/variant-lifecycle\.md\)/);
   assert.match(combined, /does not convert skill bodies/);
   assert.doesNotMatch(combined, /Success payloads include `ok: true`/);
   assert.doesNotMatch(combined, /automatically (convert|rewrite|adapt)/i);
@@ -93,12 +95,15 @@ test("docs/versioning.md documents tag-based npm release automation", async () =
   assert.match(text, /skips `npm publish` only when that exact version already exists on npm/);
 });
 
-test("README distinguishes global and source-tree command forms", async () => {
-  const text = await readFile(resolve("README.md"), "utf8");
+test("public docs distinguish global and source-tree command forms", async () => {
+  const readme = await readFile(resolve("README.md"), "utf8");
+  const install = await readFile(resolve("docs/install.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
+  const text = `${readme}\n${install}\n${reference}`;
 
   assert.match(text, /node bin\/skillboard\.mjs/);
   assert.match(text, /npm install -g agent-skillboard/);
-  assert.match(text, /replace `skillboard ` with `node bin\/skillboard\.mjs `/);
+  assert.match(text, /replace `skillboard ` with\s+`node bin\/skillboard\.mjs `/);
 });
 
 test("README shows the architecture diagram from a GitHub-hosted asset", async () => {
@@ -111,18 +116,16 @@ test("README shows the architecture diagram from a GitHub-hosted asset", async (
 test("README and install docs lead with npm quick start after registry publish", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
   const install = await readFile(resolve("docs/install.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
 
   assert.match(readme, /## 5-Minute Quick Start/);
   assert.match(readme, /npx agent-skillboard init/);
   assert.match(readme, /npx agent-skillboard brief/);
   assert.match(readme, /npx agent-skillboard doctor --summary/);
-  assert.match(readme, /npx agent-skillboard init --dir \/path\/to\/your\/project/);
-  assert.match(readme, /Unreleased GitHub builds/);
-  assert.match(readme, /npx --yes --package github:NyXXiR\/skillboard skillboard init/);
-  assert.match(readme, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
-  assert.match(readme, /node bin\/skillboard\.mjs init --dir \/path\/to\/your\/project/);
-  assert.match(readme, /node bin\/skillboard\.mjs brief --dir \/path\/to\/your\/project/);
-  assert.match(readme, /node bin\/skillboard\.mjs doctor --dir \/path\/to\/your\/project --summary/);
+  assert.match(readme, /\[docs\/install\.md\]\(docs\/install\.md\)/);
+  assert.match(readme, /\[docs\/reference\.md\]\(docs\/reference\.md\)/);
+  assert.doesNotMatch(readme, /Unreleased GitHub builds/);
+  assert.doesNotMatch(readme, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
 
   assert.match(install, /## Install From npm/);
   assert.match(install, /npx agent-skillboard init/);
@@ -134,6 +137,8 @@ test("README and install docs lead with npm quick start after registry publish",
   assert.match(install, /npx --yes --package github:NyXXiR\/skillboard skillboard init/);
   assert.match(install, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard init/);
   assert.match(install, /## Install From A Clone/);
+  assert.match(reference, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
+  assert.match(reference, /node bin\/skillboard\.mjs init --dir \/path\/to\/your\/project/);
   assert.doesNotMatch(install, /not published yet/i);
 });
 

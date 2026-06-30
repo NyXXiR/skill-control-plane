@@ -1,7 +1,7 @@
 {
   "name": "agent-skillboard",
   "version": "0.1.2",
-  "description": "Policy and visibility layer for AI agent skills.",
+  "description": "Know, gate, and audit which AI agent skills can run in each workflow.",
   "keywords": [
     "ai-agent",
     "skills",

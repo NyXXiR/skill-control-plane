@@ -18,6 +18,7 @@ test("package manifest is publishable as the SkillBoard CLI", async () => {
   const manifest = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 
   assert.equal(manifest.name, "agent-skillboard");
+  assert.equal(manifest.description, "Know, gate, and audit which AI agent skills can run in each workflow.");
   assert.equal(manifest.private, undefined);
   assert.deepEqual(manifest.bin, {
     skillboard: "bin/skillboard.mjs",
@@ -51,9 +52,11 @@ test("source-tree SkillBoard CLI entrypoint is executable for generated hooks", 
 
 test("package manifest includes the rollout operator runbook", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
   const runbook = await readFile(resolve("docs/rollout-runbook.md"), "utf8");
 
-  assert.match(readme, /skillboard rollout \[audit\|plan\|apply\|rollback\|report\]/);
+  assert.match(readme, /\[Rollout runbook\]\(docs\/rollout-runbook\.md\)/);
+  assert.match(reference, /skillboard rollout \[audit\|plan\|apply\|rollback\|report\]/);
   assert.match(runbook, /## Emergency rollback/);
   assert.match(runbook, /healthy.*0/s);
   assert.match(runbook, /rollback-needed.*4/s);
@@ -92,6 +95,7 @@ test("npm pack dry-run includes public runtime files and excludes work artifacts
   assert.ok(paths.includes("src/source-cache.mjs"));
   assert.ok(paths.includes("src/install-output-detector.mjs"));
   assert.ok(paths.includes("docs/install.md"));
+  assert.ok(paths.includes("docs/reference.md"));
   assert.ok(paths.includes("docs/rollout-runbook.md"));
   assert.equal(paths.includes("skillboard.png"), false);
   assert.equal(paths.some((path) => path.startsWith(".omo/")), false);

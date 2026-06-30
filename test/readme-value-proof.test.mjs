@@ -99,17 +99,18 @@ test("README links to the reproducible value proof report", async () => {
   assert.match(readme, /## Tested Value Proof/);
   assert.match(readme, /\[full reproducible proof\]\(docs\/value-proof\.md\)/);
   assert.match(readme, /## Why Not Just List `\/skills`\?/);
-  assert.match(readme, /A skill list answers what is declared/);
-  assert.match(readme, /SkillBoard answers what can safely run\s+now/);
+  assert.match(readme, /A raw skill list answers what is declared/);
+  assert.match(readme, /SkillBoard answers what can safely\s+run now/);
   assert.match(readme, /Same fixture, different answer/);
   assert.match(readme, /A raw list says `matt\.tdd` is active/);
-  assert.match(readme, /SkillBoard says the workflow has 0 usable\s+skills/);
+  assert.match(readme, /SkillBoard says the same workflow has 0\s+usable skills/);
   assert.match(readme, /Question/);
   assert.match(readme, /Raw list/);
   assert.match(readme, /SkillBoard brief/);
   assert.match(readme, /0 usable skills/);
   assert.match(readme, /8 blocked skills/);
   assert.match(readme, /Policy errors: 2/);
+  assert.match(readme, /\[Command and config reference\]\(docs\/reference\.md\)/);
 
   assert.match(proof, /node --test test\/readme-value-proof\.test\.mjs/);
   assert.match(proof, /GitHub-reader takeaway/);
