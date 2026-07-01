@@ -3,6 +3,7 @@ import {
   NON_CALLABLE_WORKFLOW_INVOCATIONS,
   NON_CALLABLE_WORKFLOW_STATUSES
 } from "../domain/constants.mjs";
+import { workflowConflictEntriesForSkill } from "../conflicts.mjs";
 import { isModelSelectableInvocation, isUserControlledSource } from "../domain/source-classes.mjs";
 import { classifySkillTrust, workflowSkillRole } from "./source-trust.mjs";
 
@@ -12,9 +13,6 @@ export function canUseSkill(workspace, skillId, workflowName) {
   const workflow = workspace.workflows.find((candidate) => candidate.name === workflowName);
   const reasons = [];
 
-  if (!policy.ok) {
-    reasons.push("Policy check failed.");
-  }
   if (skill === undefined) {
     reasons.push(`Unknown skill: ${skillId}`);
   }
@@ -26,6 +24,13 @@ export function canUseSkill(workspace, skillId, workflowName) {
   }
 
   const role = workflowSkillRole(workflow, skillId);
+  for (const conflict of workflowConflictEntriesForSkill(workspace, workflow, skillId)) {
+    const other = conflict.skill === skillId ? conflict.conflictingSkill : conflict.skill;
+    reasons.push(`Skill ${skillId} conflicts with active skill ${other} in workflow ${workflowName}.`);
+  }
+  if (!policy.ok) {
+    reasons.push("Policy check failed.");
+  }
   if (workflow.blockedSkills.includes(skillId)) {
     reasons.push(`Workflow ${workflowName} blocks skill ${skillId}.`);
   }

@@ -1,7 +1,5 @@
 // SIZE_OK: src/brief-renderer.mjs is pre-existing renderer debt; this change only adds narrow AI/automation copy until a broader renderer split.
 const SKILL_SECTIONS = [
-  ["What your AI can use now", "automatic_allowed"],
-  ["Manual only", "manual_allowed"],
   ["Needs your decision", "needs_review"],
   ["Blocked for safety", "blocked"]
 ];
@@ -50,10 +48,16 @@ export function renderSkillBrief(brief, options = {}) {
   if (brief.error !== undefined) {
     lines.push(`Error: ${safeText(brief.error.message)}`, "");
   }
+  emitIntentRoute(lines, brief);
   emitPolicyHealth(lines, brief);
   emitCategorySummary(lines, brief);
   emitNextAction(lines, brief, { verbose });
+  emitAvailableNowSection(lines, brief, { verbose });
   for (const [title, key] of SKILL_SECTIONS) {
+    if (key === "needs_review") {
+      emitDecisionSection(lines, brief, { verbose });
+      continue;
+    }
     emitSkillSection(lines, title, brief.skills[key], {
       brief,
       groupLabel: compactGroupLabel(key),
@@ -70,6 +74,56 @@ export function renderSkillBrief(brief, options = {}) {
   });
   emitActions(lines, brief, { verbose });
   return `${lines.join("\n")}\n`;
+}
+
+function emitIntentRoute(lines, brief) {
+  const route = brief.assistant_guidance?.route;
+  if (route === undefined) {
+    return;
+  }
+  lines.push("## Suggested skill for this request", "");
+  lines.push(`- Intent: ${safeText(route.intent)}`);
+  lines.push(`- Match source: ${route.match_source}`);
+  lines.push(`- Matched capability: ${route.matched_capability ?? "none"}`);
+  lines.push(`- Matched skill: ${route.matched_skill === null ? "none" : code(route.matched_skill)}`);
+  lines.push(`- Confidence: ${route.confidence}`);
+  lines.push(`- Why: ${safeText(route.recommendation_reason, 320)}`);
+  lines.push(`- Matched terms: ${formatCodeList(route.matched_terms)}`);
+  if (route.recommended_skill === null) {
+    lines.push("- Recommended skill: none");
+    lines.push("- Next step: ask a clarifying question before choosing a skill.");
+  } else {
+    lines.push(`- Recommended skill: ${code(route.recommended_skill)}`);
+    lines.push(`- Fallback skills: ${formatCodeList(route.fallback_skills)}`);
+    if ((route.route_candidates ?? []).length > 0) {
+      lines.push("- Route candidates:");
+      for (const candidate of route.route_candidates) {
+        lines.push(`  - ${code(candidate.skill)} (${routeCandidateStatus(candidate)})`);
+        if (!candidate.guard_allowed && candidate.guard_reasons.length > 0) {
+          lines.push(`    - ${safeText(candidate.guard_reasons[0])}`);
+        }
+      }
+    }
+    lines.push(`- Guard: ${code(route.guard_command, Number.POSITIVE_INFINITY)}`);
+    if (route.usage_disclosure !== null && route.usage_disclosure !== undefined) {
+      lines.push(`- Disclosure: ${routeDisclosureText(code(route.recommended_skill))}`);
+      lines.push(`- Say before use: "${safeText(route.usage_disclosure.start_message)}"`);
+      lines.push(`- Say after completion: "${safeText(route.usage_disclosure.finish_message)}"`);
+    }
+  }
+  lines.push("");
+}
+
+function routeCandidateStatus(candidate) {
+  return [
+    candidate.role,
+    candidate.selected ? "selected" : null,
+    candidate.guard_allowed ? "allowed" : "denied"
+  ].filter((value) => value !== null).join(", ");
+}
+
+function routeDisclosureText(skillLabel) {
+  return `run the guard automatically, state at the start that ${skillLabel} is being used, and state at completion that it was used. No extra user approval is needed when the guard allows it.`;
 }
 
 function emitPolicyHealth(lines, brief) {
@@ -119,9 +173,52 @@ function briefCounts(brief) {
     automatic,
     manual,
     usable: automatic + manual,
-    needsDecision: brief.skills.needs_review.length,
+    needsDecision: decisionCount(brief),
     blocked: brief.skills.blocked.length
   };
+}
+
+function decisionCount(brief) {
+  const skillDecisionCount = brief.skills.needs_review.length;
+  if (skillDecisionCount > 0) {
+    return skillDecisionCount;
+  }
+  return brief.review_queue?.length ?? 0;
+}
+
+function emitAvailableNowSection(lines, brief, options) {
+  lines.push("## What your AI can use now", "");
+  const entries = [
+    ...brief.skills.automatic_allowed.map((entry) => ({ entry, mode: "automatic" })),
+    ...brief.skills.manual_allowed.map((entry) => ({ entry, mode: "manual-only" }))
+  ];
+  if (entries.length === 0) {
+    lines.push("- none", "");
+    return;
+  }
+  lines.push("Automatic skills can be selected by the AI. On-request skills can be used when the user asks the AI; the AI runs the guard first.");
+  lines.push("When the guard allows use, disclose the selected skill at the start and completion instead of asking again.", "");
+  const visibleEntries = options.verbose ? entries : entries.slice(0, COMPACT_SKILL_LIMIT);
+  for (const item of visibleEntries) {
+    lines.push(formatSkillEntry(item.entry, [availableModeLabel(item.mode)]));
+  }
+  const hiddenEntries = entries.slice(visibleEntries.length);
+  if (hiddenEntries.length > 0) {
+    lines.push(`- ${hiddenEntries.length} more ${availableHiddenLabel(hiddenEntries)} hidden. Run ${code(verboseCommand(brief))} or ${code(listCommand(brief))}.`);
+  }
+  lines.push("");
+}
+
+function availableHiddenLabel(entries) {
+  const modes = new Set(entries.map((entry) => entry.mode));
+  if (modes.size !== 1) {
+    return "available skills";
+  }
+  return modes.has("manual-only") ? "on-request skills" : "automatic skills";
+}
+
+function availableModeLabel(mode) {
+  return mode === "manual-only" ? "on request" : mode;
 }
 
 function emitSkillSection(lines, title, entries, options) {
@@ -130,19 +227,77 @@ function emitSkillSection(lines, title, entries, options) {
     lines.push("- none", "");
     return;
   }
+  emitSkillEntries(lines, entries, options);
+  lines.push("");
+}
+
+function emitSkillEntries(lines, entries, options) {
   const visibleEntries = options.verbose ? entries : entries.slice(0, COMPACT_SKILL_LIMIT);
   for (const entry of visibleEntries) {
-    const path = entry.path === undefined ? "" : ` (${safeText(entry.path)})`;
-    const reason = entry.reason === null || entry.reason === undefined
-      ? ""
-      : ` - ${safeText(entry.reason)}`;
-    lines.push(`- ${code(entry.id)}${path}${reason}`);
+    lines.push(formatSkillEntry(entry));
   }
   const hidden = entries.length - visibleEntries.length;
   if (hidden > 0) {
     lines.push(`- ${hidden} more ${options.groupLabel} hidden. Run ${code(verboseCommand(options.brief))} or ${code(listCommand(options.brief))}.`);
   }
+}
+
+function formatSkillEntry(entry, labels = []) {
+  const path = entry.path === undefined ? "" : ` (${safeText(entry.path)})`;
+  const reason = entry.reason === null || entry.reason === undefined ? null : safeText(entry.reason);
+  const details = [...labels, reason].filter((value) => value !== null && value !== "");
+  const suffix = details.length === 0 ? "" : ` - ${details.join("; ")}`;
+  return `- ${code(entry.id)}${path}${suffix}`;
+}
+
+function emitDecisionSection(lines, brief, options) {
+  lines.push("## Needs your decision", "");
+  const skillEntries = brief.skills.needs_review;
+  const reviewEntries = reviewEntriesForDecisionSection(brief, skillEntries);
+  if (skillEntries.length === 0 && reviewEntries.length === 0) {
+    lines.push("- none", "");
+    return;
+  }
+  if (skillEntries.length > 0) {
+    emitSkillEntries(lines, skillEntries, {
+      ...options,
+      brief,
+      groupLabel: "decision items"
+    });
+  }
+  if (reviewEntries.length > 0) {
+    emitReviewQueueEntries(lines, reviewEntries, {
+      ...options,
+      brief
+    });
+  }
   lines.push("");
+}
+
+function reviewEntriesForDecisionSection(brief, skillEntries) {
+  if (skillEntries.length === 0) {
+    return brief.review_queue ?? [];
+  }
+  return [];
+}
+
+function emitReviewQueueEntries(lines, entries, options) {
+  const visibleEntries = options.verbose ? entries : entries.slice(0, COMPACT_SKILL_LIMIT);
+  for (const entry of visibleEntries) {
+    const label = entry.label ?? entry.title ?? entry.id;
+    const action = firstActionId(entry);
+    const actionText = action === null ? "" : ` - action: ${code(action)}`;
+    lines.push(`- ${safeText(label)} - ${safeText(entry.reason)}${actionText}`);
+  }
+  const hidden = entries.length - visibleEntries.length;
+  if (hidden > 0) {
+    lines.push(`- ${hidden} more review decisions hidden. Run ${code(verboseCommand(options.brief))}.`);
+  }
+}
+
+function firstActionId(entry) {
+  const [action] = entry.action_ids ?? [];
+  return typeof action === "string" ? action : null;
 }
 
 function emitCategorySummary(lines, brief) {
@@ -404,4 +559,8 @@ function safeText(value, maxLength = 180) {
 
 function code(value, maxLength = 180) {
   return `\`${safeText(value, maxLength)}\``;
+}
+
+function formatCodeList(values) {
+  return values.length === 0 ? "none" : values.map((value) => code(value)).join(", ");
 }

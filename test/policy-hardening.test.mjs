@@ -41,6 +41,21 @@ test("policy rejects semantic drift in canonical_for and conflicts_with", async 
   assert.match(errors, /Skill meerkat\.requirement-intake conflicts_with undeclared skill: missing\.skill/);
 });
 
+test("policy rejects active conflicting skills in the same workflow", async () => {
+  const workspace = await loadWorkspace({ configPath: CONFIG, skillsRoot: SKILLS });
+  const workflow = workspace.workflows.find((candidate) => candidate.name === "codex-night-workflow");
+  workflow.blockedSkills = workflow.blockedSkills.filter((skillId) => skillId !== "matt.grill-me");
+  workflow.activeSkills.push("matt.grill-me");
+
+  const result = checkPolicy(workspace);
+
+  assert.equal(result.ok, false);
+  assert.match(
+    result.errors.join("\n"),
+    /Workflow codex-night-workflow has active skill conflict: meerkat\.requirement-intake conflicts_with matt\.grill-me/
+  );
+});
+
 test("policy rejects contradictory status and invocation combinations", async () => {
   const workspace = await loadWorkspace({ configPath: CONFIG, skillsRoot: SKILLS });
   workspace.skills.find((skill) => skill.id === "matt.tdd").invocation = "blocked";

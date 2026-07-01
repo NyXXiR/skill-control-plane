@@ -17,16 +17,23 @@ For CI or scripts, the explicit package form avoids binary-name ambiguity:
 
 ```bash
 npx --yes --package agent-skillboard skillboard init
+npx --yes --package agent-skillboard skillboard doctor --summary
+npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>
 npm exec --yes --package agent-skillboard -- skillboard init
+npm exec --yes --package agent-skillboard -- skillboard doctor --summary
+npm exec --yes --package agent-skillboard -- skillboard brief --workflow <workflow-from-init>
 ```
+
+If `init` does not print a workflow, run the unscoped `brief` command it prints
+instead.
 
 Unreleased GitHub builds are available when intentionally testing repository
 state before the next npm release:
 
 ```bash
 npx --yes --package github:NyXXiR/skillboard skillboard init
-npx --yes --package github:NyXXiR/skillboard skillboard brief
 npx --yes --package github:NyXXiR/skillboard skillboard doctor --summary
+npx --yes --package github:NyXXiR/skillboard skillboard brief --workflow <workflow-from-init>
 ```
 
 From a source clone:
@@ -37,8 +44,8 @@ cd skillboard
 npm install
 npm test
 node bin/skillboard.mjs init --dir /path/to/your/project
-node bin/skillboard.mjs brief --dir /path/to/your/project
 node bin/skillboard.mjs doctor --dir /path/to/your/project --summary
+node bin/skillboard.mjs brief --dir /path/to/your/project --workflow <workflow-from-init>
 ```
 
 ## Commands
@@ -51,7 +58,7 @@ skillboard inventory detect --unit <id> --config <path> [--install-output <path>
 skillboard sources refresh [--dir <path>] [--config <path>] [--unit <id>[,<id>]] [--cache-dir <dir>] [--dry-run] [--json]
 skillboard doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json] [--summary]
 skillboard status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--json] [--summary]
-skillboard brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]
+skillboard brief [--workflow <name>] [--intent <request>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]
 skillboard apply-action <action-id> [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--dry-run] [--yes] [--allow-destructive] [--json]
 skillboard import --profile <id-or-path> --source-root <dir> [--profile-dirs a,b] [--out <path>]
 skillboard import --profile <id-or-path> --source-root <dir> --config <path> --merge [--replace] [--dry-run]
@@ -59,6 +66,7 @@ skillboard scan --config <path> --skills <dir>
 skillboard check --config <path> --skills <dir>
 skillboard list [skills|workflows|harnesses|install-units] --config <path> --skills <dir>
 skillboard explain <skill-id> --config <path> --skills <dir>
+skillboard route <intent> --workflow <name> --config <path> --skills <dir> [--json]
 skillboard can-use <skill-id> --workflow <name> --config <path> --skills <dir>
 skillboard guard use <skill-id> --workflow <name> --config <path> --skills <dir>
 skillboard audit sources --config <path> --skills <dir> [--verify]
@@ -84,6 +92,50 @@ skillboard reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--
 skillboard impact disable <skill-id> --config <path> --skills <dir> [--out <path>] [--json]
 ```
 
+## Capability Routing
+
+For the normal AI-mediated flow, prefer `brief --intent`: it returns the current
+availability brief plus a compact route recommendation in `assistant_guidance`.
+
+```bash
+skillboard brief \
+  --intent "write tests before implementation" \
+  --workflow codex-night-workflow \
+  --config skillboard.config.yaml \
+  --skills skills \
+  --json
+```
+
+`route` is a read-only recommendation surface for AI/automation. It maps a
+normal user request to the best matching workflow capability or workflow-bound
+skill metadata, then returns the recommended skill, fallback skills, matched
+terms, recommendation reason, and the guard command that must still pass before
+invocation.
+
+```bash
+skillboard route "write tests before implementation" \
+  --workflow codex-night-workflow \
+  --config skillboard.config.yaml \
+  --skills skills \
+  --json
+```
+
+Routing first uses declared capability names and workflow bindings. If a fresh
+project has workflow skills but no capability catalog yet, it can fall back to
+workflow-bound skill id, path, category, `SKILL.md` name, and `SKILL.md`
+description metadata. It does not inspect or semantically rank `SKILL.md` bodies,
+and it does not invoke the skill. The JSON payload includes `match_source`,
+`matched_terms`, and `recommendation_reason` so the AI can explain why it chose
+or declined a skill without inventing rationale.
+Recommended and fallback skills are limited to the selected workflow's active,
+required, or global-auto bindings rather than every global alternative in the
+capability catalog. When nothing matches, the result keeps
+`matched_capability: null` and `recommended_skill: null`, then returns possible
+workflow skills so the AI can ask a clarifying question. When a guard allows the
+recommended skill, the AI should disclose the skill at start and completion
+instead of asking for another approval. That disclosure is an audit trace, not a
+permission prompt.
+
 ## Config Shape
 
 ```yaml
@@ -101,6 +153,8 @@ skills:
     invocation: workflow-auto
     exposure: exported
     category: engineering
+    conflicts_with:
+      - meerkat.no-tests-please
 
   user.workflow-router:
     path: user/workflow-router
@@ -167,6 +221,16 @@ workflows:
           - meerkat.test-first-implementation
         policy: workflow-auto
 ```
+
+`conflicts_with` is runtime policy, not documentation-only metadata. A workflow
+cannot keep both sides selectable unless one side is explicitly blocked in that
+workflow. Conflict failures appear in policy errors, guard reasons, brief
+blocking reasons, and impact reports. `impact disable --json` includes:
+
+- `conflictingSkills`: declared direct or reverse conflicts for the target
+  skill.
+- `activeConflicts`: workflow-scoped conflict pairs currently involving the
+  target skill.
 
 ## Source Profiles
 

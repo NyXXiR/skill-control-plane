@@ -33,6 +33,7 @@ try {
   const tarball = await packPackage(packRoot);
   await npm(["exec", "--yes", "--package", tarball, "--", "skillboard", "help"]);
   await npm(["exec", "--yes", "--package", tarball, "--", "skillboard", "init", "--dir", projectRoot, "--no-scan-installed"]);
+  await assertPackagedIntentBrief(tarball, projectRoot);
 
   await node(["bin/skillboard.mjs", "inventory", "refresh", "--dir", projectRoot, "--dry-run"], {
     env: { CODEX_HOME: codexHome }
@@ -117,6 +118,44 @@ async function createSourceRepo(repoRoot) {
   await writeFile(join(repoRoot, "README.md"), "source smoke\n", "utf8");
   await git(["-C", repoRoot, "add", "README.md"]);
   await git(["-C", repoRoot, "-c", "user.email=ci@example.test", "-c", "user.name=SkillBoardCI", "commit", "-m", "init"]);
+}
+
+async function assertPackagedIntentBrief(tarball, projectRoot) {
+  const skillsRoot = join(projectRoot, "skills");
+  const skillPath = join(skillsRoot, "user-test-first");
+  const configPath = join(projectRoot, "skillboard.config.yaml");
+  const baseArgs = ["--config", configPath, "--skills", skillsRoot];
+
+  await mkdir(skillPath, { recursive: true });
+  await writeFile(
+    join(skillPath, "SKILL.md"),
+    "---\nname: test-first\ndescription: Write tests before implementation.\n---\n# test-first\n",
+    "utf8"
+  );
+  await npm(["exec", "--yes", "--package", tarball, "--", "skillboard", "add", "skill", "user.test-first", "--path", "user-test-first", "--category", "testing", ...baseArgs]);
+  await npm(["exec", "--yes", "--package", tarball, "--", "skillboard", "add", "workflow", "daily-workflow", "--harness", "codex", "--skill", "user.test-first", ...baseArgs]);
+
+  const brief = await npm([
+    "exec",
+    "--yes",
+    "--package",
+    tarball,
+    "--",
+    "skillboard",
+    "brief",
+    "--intent",
+    "write tests before implementation",
+    "--workflow",
+    "daily-workflow",
+    ...baseArgs,
+    "--json"
+  ]);
+  const payload = JSON.parse(brief.stdout.toString());
+  assert.equal(payload.assistant_guidance.route.recommended_skill, "user.test-first");
+  assert.equal(payload.assistant_guidance.route.usage_disclosure.confirmation_required, false);
+
+  const guard = await npm(["exec", "--yes", "--package", tarball, "--", "skillboard", "guard", "use", "user.test-first", "--workflow", "daily-workflow", ...baseArgs, "--json"]);
+  assert.equal(JSON.parse(guard.stdout.toString()).allowed, true);
 }
 
 async function addRemoteSource(configPath, repoRoot) {

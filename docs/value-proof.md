@@ -18,7 +18,8 @@ The raw list answers inventory questions: which skill declarations are connected
 to this workflow?
 
 SkillBoard answers operational safety questions: which skills can actually run
-now, why are others blocked, and what approved action changes the next state?
+now, why are others blocked, which skill fits the user's current request, and
+what approved action changes the next state?
 
 In the tested fixture, the raw list can make the workflow look ready because it
 shows `matt.tdd active workflow-auto`. SkillBoard refuses that unsafe claim and
@@ -145,3 +146,45 @@ What this proves:
   output.
 - SkillBoard keeps the guard as the final boundary before invocation.
 - Blocked skills still produce a non-zero, machine-readable denial.
+
+## Case 4: AI route picks the right allowed skill
+
+The same fixture also proves that SkillBoard can help the AI choose the right
+skill before invocation:
+
+```bash
+node bin/skillboard.mjs route "write tests before implementation" \
+  --config examples/multi-source.config.yaml \
+  --skills examples/multi-source-skills \
+  --workflow codex-night-workflow \
+  --json
+```
+
+Observed route result:
+
+- Matched capability: `test-first-implementation`.
+- Match source: `capability`.
+- Confidence: `high`.
+- Recommended skill: `matt.tdd`.
+- Fallback skill: `private.tdd-work-continuity`.
+- Guard command: `skillboard guard use matt.tdd ...`.
+- Guard result for `matt.tdd`: allowed.
+- Start disclosure: `I will use matt.tdd for this request.`
+- Finish disclosure: `I used matt.tdd for this request.`
+
+The proof also checks `brief --intent "write tests before implementation"` so
+the recommendation appears inside `assistant_guidance.route`, not only through
+the standalone `route` command.
+
+For a request outside the workflow's declared capability, such as "ship a
+powerpoint deck", SkillBoard returns no recommended skill and tells the AI to:
+Ask a clarifying question before choosing a skill.
+
+What this proves:
+
+- The AI can ask SkillBoard which skill fits a normal user request instead of
+  guessing from raw `SKILL.md` text.
+- Allowed skill use stays low-friction: the AI discloses use at start and
+  finish instead of asking for redundant approval.
+- No-match results are explicit, so the AI can ask a clarifying question rather
+  than forcing a poor skill choice.

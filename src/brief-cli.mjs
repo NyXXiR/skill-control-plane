@@ -6,11 +6,12 @@ export async function runBriefCommand(options, stdout, paths) {
   const json = options.get("json") === "true";
   const result = await buildSkillBrief({
     root: briefRoot(options),
-      configPath: paths.configPath,
-      skillsRoot: paths.skillsRoot,
-      workflow: options.get("workflow"),
-      includeActions: options.get("include-actions") === "true" || !json
-    });
+    configPath: paths.configPath,
+    skillsRoot: paths.skillsRoot,
+    workflow: options.get("workflow"),
+    intent: options.get("intent"),
+    includeActions: options.get("include-actions") === "true" || !json
+  });
   writeBriefOutput(stdout, result, options);
   return briefExitCode(result);
 }

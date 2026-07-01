@@ -31,7 +31,6 @@ test("brief command renders readable text sections", async () => {
     assert.match(result.stdout, /^# SkillBoard Brief\n\nAI can use now: 1 \(0 automatic, 1 manual\)\nNeeds your decision: 0\nBlocked for safety: 0/m);
     assert.match(result.stdout, /## Next safe action/);
     assert.match(result.stdout, /What your AI can use now/);
-    assert.match(result.stdout, /Manual only/);
     assert.match(result.stdout, /Needs your decision/);
     assert.match(result.stdout, /Blocked for safety/);
     assert.match(result.stdout, /Not in this workflow/);
@@ -40,6 +39,154 @@ test("brief command renders readable text sections", async () => {
     assert.doesNotMatch(result.stdout, /underlying apply:/);
     assert.doesNotMatch(result.stdout, /Action cards not requested/);
     assert.throws(() => JSON.parse(result.stdout));
+  });
+});
+
+test("brief command does not hide manual-only skills from the usable-now section", async () => {
+  await withBriefFixture(async ({ configPath, skillsRoot }) => {
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow"
+    ]);
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /AI can use now: 1 \(0 automatic, 1 manual\)/);
+    const usableSection = sectionBetween(result.stdout, "## What your AI can use now", "## Needs your decision");
+    assert.match(usableSection, /On-request skills can be used when the user asks the AI; the AI runs the guard first\./);
+    assert.match(usableSection, /When the guard allows use, disclose the selected skill at the start and completion instead of asking again\./);
+    assert.match(usableSection, /user\.local-helper/);
+    assert.match(usableSection, /on request/);
+    assert.doesNotMatch(usableSection, /manual-only/);
+    assert.doesNotMatch(usableSection, /^-\s*none$/m);
+    assert.doesNotMatch(result.stdout, /## Manual only/);
+  });
+});
+
+test("brief command intent json includes route-backed skill suggestion", async () => {
+  await withIntentRouteFixture(async ({ configPath, skillsRoot }) => {
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--intent",
+      "write tests before implementation",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(result.code, 0);
+    assert.equal(payload.assistant_guidance.status, "ready");
+    assert.match(payload.assistant_guidance.recommended_next_step, /matt\.tdd/);
+    assert.equal(payload.assistant_guidance.route.intent, "write tests before implementation");
+    assert.equal(payload.assistant_guidance.route.matched_capability, "test-first-implementation");
+    assert.equal(payload.assistant_guidance.route.match_source, "capability");
+    assert.equal(payload.assistant_guidance.route.confidence, "high");
+    assert.equal(payload.assistant_guidance.route.recommended_skill, "matt.tdd");
+    assert.deepEqual(payload.assistant_guidance.route.fallback_skills, ["private.tdd-work-continuity"]);
+    assert.deepEqual(payload.assistant_guidance.route.route_candidates.map((candidate) => ({
+      skill: candidate.skill,
+      role: candidate.role,
+      selected: candidate.selected,
+      guard_allowed: candidate.guard_allowed
+    })), [
+      {
+        skill: "matt.tdd",
+        role: "preferred",
+        selected: true,
+        guard_allowed: true
+      },
+      {
+        skill: "private.tdd-work-continuity",
+        role: "fallback",
+        selected: false,
+        guard_allowed: true
+      }
+    ]);
+    assert.ok(payload.assistant_guidance.route.matched_terms.includes("test"));
+    assert.match(payload.assistant_guidance.route.recommendation_reason, /Matched capability test-first-implementation/);
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.confirmation_required, false);
+    assert.match(payload.assistant_guidance.route.usage_disclosure.start, /State at the start that matt\.tdd is being used/);
+    assert.match(payload.assistant_guidance.route.usage_disclosure.finish, /State at completion that matt\.tdd was used/);
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.start_message, "I will use matt.tdd for this request.");
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.finish_message, "I used matt.tdd for this request.");
+    assert.equal(payload.assistant_guidance.route.guard_allowed, true);
+    assert.match(payload.assistant_guidance.route.guard_command, /skillboard guard use matt\.tdd/);
+  });
+});
+
+test("brief command intent text renders suggested skill without hiding guard boundary", async () => {
+  await withIntentRouteFixture(async ({ configPath, skillsRoot }) => {
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--intent",
+      "write tests before implementation"
+    ]);
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /## Suggested skill for this request/);
+    assert.match(result.stdout, /Intent: write tests before implementation/);
+    assert.match(result.stdout, /Match source: capability/);
+    assert.match(result.stdout, /Matched capability: test-first-implementation/);
+    assert.match(result.stdout, /Matched skill: none/);
+    assert.match(result.stdout, /Why: Matched capability test-first-implementation/);
+    assert.match(result.stdout, /Matched terms: `implementation`, `test`/);
+    assert.match(result.stdout, /Recommended skill: `matt\.tdd`/);
+    assert.match(result.stdout, /Fallback skills: `private\.tdd-work-continuity`/);
+    assert.match(result.stdout, /Route candidates:/);
+    assert.match(result.stdout, /`matt\.tdd` \(preferred, selected, allowed\)/);
+    assert.match(result.stdout, /`private\.tdd-work-continuity` \(fallback, allowed\)/);
+    assert.match(result.stdout, /Guard: `skillboard guard use matt\.tdd/);
+    assert.match(
+      result.stdout,
+      /Disclosure: run the guard automatically, state at the start that `matt\.tdd` is being used, and state at completion that it was used\. No extra user approval is needed when the guard allows it\./
+    );
+    assert.match(result.stdout, /Say before use: "I will use matt\.tdd for this request\."/);
+    assert.match(result.stdout, /Say after completion: "I used matt\.tdd for this request\."/);
+  });
+});
+
+test("brief command intent no-match asks for clarification in guidance", async () => {
+  await withIntentRouteFixture(async ({ configPath, skillsRoot }) => {
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--intent",
+      "draw a logo",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(result.code, 0);
+    assert.equal(payload.assistant_guidance.route.matched_capability, null);
+    assert.equal(payload.assistant_guidance.route.match_source, "none");
+    assert.equal(payload.assistant_guidance.route.confidence, "none");
+    assert.equal(payload.assistant_guidance.route.recommended_skill, null);
+    assert.deepEqual(payload.assistant_guidance.route.matched_terms, []);
+    assert.match(payload.assistant_guidance.route.recommendation_reason, /No workflow capability or skill metadata matched/);
+    assert.equal(payload.assistant_guidance.route.usage_disclosure, null);
+    assert.equal(payload.assistant_guidance.route.guard_command, null);
+    assert.match(payload.assistant_guidance.recommended_next_step, /clarify/i);
+    assert.ok(payload.assistant_guidance.route.possible_skills.some((skill) => skill.id === "matt.tdd"));
   });
 });
 
@@ -63,6 +210,25 @@ test("brief command treats reviewable source friction as a decision queue, not h
     assert.match(result.stdout, /Decide whether to block source acme\.pack/);
     assert.doesNotMatch(result.stdout, /Action cards not requested/);
   });
+});
+
+test("brief command surfaces non-skill review queue decisions in text summary", async () => {
+  const result = await runCli([
+    "brief",
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow"
+  ]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Needs your decision: 5/);
+  const decisionSection = sectionBetween(result.stdout, "## Needs your decision", "## Blocked for safety");
+  assert.doesNotMatch(decisionSection, /^-\s*none$/m);
+  assert.match(decisionSection, /Review github\.voltagent\.awesome-agent-skills/);
+  assert.match(decisionSection, /source is not pinned by digest or signature/);
 });
 
 test("brief command surfaces policy errors above skill lists", async () => {
@@ -171,7 +337,7 @@ test("brief command defaults to compact output for large manual skill sets", asy
     assert.match(compact.stdout, /AI can use now: 18 \(0 automatic, 18 manual\)/);
     assert.match(compact.stdout, /## Top categories/);
     assert.match(compact.stdout, /Run `skillboard brief --verbose/);
-    assert.match(compact.stdout, /13 more manual-only skills hidden/);
+    assert.match(compact.stdout, /13 more on-request skills hidden/);
     assert.doesNotMatch(compact.stdout, /manual\.skill-18/);
     assert.doesNotMatch(compact.stdout, /underlying apply:/);
     assert.match(verbose.stdout, /manual\.skill-18/);
@@ -240,6 +406,7 @@ test("brief command include-actions json guides review-needed decisions", async 
 
     assert.equal(result.code, 1);
     assertAssistantGuidance(payload, { status: "needs-decision", hasWorkflowGuardHint: true });
+    assert.match(payload.assistant_guidance.summary, /1 user decision/);
     assert.ok(payload.assistant_guidance.choices.some((choice) => choice.risk === "high"));
   });
 });
@@ -380,6 +547,12 @@ test("brief command initialized empty project json omits actions by default", as
     assert.equal(result.code, 0);
     assert.equal(payload.schema_version, 1);
     assert.equal(Object.hasOwn(payload, "actions"), false);
+    assertAssistantGuidance(payload, {
+      status: "workflow-selection-needed",
+      hasWorkflowGuardHint: false,
+      choicesMatchActions: false
+    });
+    assert.deepEqual(payload.assistant_guidance.choices, []);
   });
 });
 
@@ -449,6 +622,35 @@ test("brief command missing config json exits with expected payload", async () =
     assert.match(payload.assistant_guidance.recommended_next_step, /Initialize SkillBoard/);
     assert.doesNotMatch(payload.assistant_guidance.recommended_next_step, /approve/i);
     assert.deepEqual(await readdir(root), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("brief command missing config json includes setup guidance without actions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-brief-missing-no-actions-cli-"));
+  try {
+    const result = await runCli([
+      "brief",
+      "--dir",
+      root,
+      "--config",
+      join(root, "skillboard.config.yaml"),
+      "--skills",
+      join(root, "skills"),
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(result.code, 1);
+    assert.equal(Object.hasOwn(payload, "actions"), false);
+    assertAssistantGuidance(payload, {
+      status: "not-initialized",
+      hasWorkflowGuardHint: false,
+      choicesMatchActions: false
+    });
+    assert.deepEqual(payload.assistant_guidance.choices, []);
+    assert.match(payload.assistant_guidance.recommended_next_step, /Initialize SkillBoard/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -548,13 +750,34 @@ test("brief command unknown workflow json exits with expected payload", async ()
 });
 
 test("brief command help lists command and options", async () => {
-  const result = await runCli(["help"]);
+  const result = await runCli(["brief", "--help"]);
 
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /brief \[--workflow <name>\]/);
+  assert.match(result.stdout, /^Usage: skillboard brief \[--workflow <name>\]/m);
+  assert.match(result.stdout, /\[--intent <request>\]/);
   assert.match(result.stdout, /--include-actions/);
   assert.match(result.stdout, /--json/);
   assert.match(result.stdout, /--verbose/);
+  assert.match(result.stdout, /Reads the current SkillBoard brief/);
+  assert.doesNotMatch(result.stdout, /^# SkillBoard Brief/m);
+});
+
+test("brief command help is available through help brief", async () => {
+  const result = await runCli(["help", "brief"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /^Usage: skillboard brief \[--workflow <name>\]/m);
+  assert.match(result.stdout, /guard use/);
+  assert.doesNotMatch(result.stdout, /^SkillBoard - AI-mediated workflow-scoped skill policy$/m);
+});
+
+test("command-local help does not hide unknown commands", async () => {
+  const result = await runCli(["biref", "--help"]);
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /Unknown command: biref/);
+  assert.match(result.stderr, /Run skillboard help for usage\./);
 });
 
 function compactConfig(skillIds) {
@@ -594,6 +817,77 @@ async function listProjectTree(root) {
   return (await readdir(root, { recursive: true })).map(String).sort();
 }
 
+async function withIntentRouteFixture(run) {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-brief-intent-route-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "matt-tdd"), { recursive: true });
+    await mkdir(join(skillsRoot, "private-tdd"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "matt-tdd", "SKILL.md"),
+      "---\nname: matt-tdd\ndescription: Write tests before implementation.\n---\n# matt-tdd\n",
+      "utf8"
+    );
+    await writeFile(
+      join(skillsRoot, "private-tdd", "SKILL.md"),
+      "---\nname: private-tdd\ndescription: Keep TDD work continuous.\n---\n# private-tdd\n",
+      "utf8"
+    );
+    await writeFile(configPath, intentRouteConfig(), "utf8");
+    return await run({ configPath, root, skillsRoot });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function intentRouteConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  matt.tdd:
+    path: matt-tdd
+    status: active
+    invocation: workflow-auto
+    exposure: exported
+    category: engineering
+  private.tdd-work-continuity:
+    path: private-tdd
+    status: active
+    invocation: router-only
+    exposure: exported
+    category: engineering
+capabilities:
+  test-first-implementation:
+    canonical: matt.tdd
+    alternatives:
+      - private.tdd-work-continuity
+    default_policy: workflow-auto
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - matt.tdd
+      - private.tdd-work-continuity
+    blocked_skills: []
+    required_capabilities:
+      test-first-implementation:
+        preferred: matt.tdd
+        fallback:
+          - private.tdd-work-continuity
+        policy: workflow-auto
+install_units: {}
+`;
+}
+
 function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choicesMatchActions = true }) {
   assert.ok(payload.assistant_guidance, "expected assistant_guidance");
   assert.deepEqual(Object.keys(payload.assistant_guidance), [
@@ -613,7 +907,15 @@ function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choice
   assert.deepEqual(payload.assistant_guidance.guard, {
     required: true,
     when: "before invoking a skill",
-    command_hint: hasWorkflowGuardHint ? payload.assistant_guidance.guard.command_hint : null
+    command_hint: hasWorkflowGuardHint ? payload.assistant_guidance.guard.command_hint : null,
+    allowed_use: {
+      confirmation_required: false,
+      start: "State at the start which selected skill is being used for this request.",
+      finish: "State at completion which selected skill was used.",
+      start_message_template: "I will use <skill-id> for this request.",
+      finish_message_template: "I used <skill-id> for this request.",
+      ask_user_when: "Ask the user only if the guard denies use or a policy-changing action is needed."
+    }
   });
   if (hasWorkflowGuardHint) {
     assert.match(payload.assistant_guidance.guard.command_hint, /skillboard guard use '?<skill-id>'?/);
@@ -629,6 +931,8 @@ function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choice
     assert.deepEqual(Object.keys(choice), [
       "label",
       "action_id",
+      "kind",
+      "applies_to",
       "risk",
       "requires_confirmation",
       "effect",
@@ -636,6 +940,8 @@ function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choice
     ]);
     assert.equal(typeof choice.label, "string");
     assert.equal(typeof choice.action_id, "string");
+    assert.equal(typeof choice.kind, "string");
+    assert.ok(choice.applies_to === null || typeof choice.applies_to === "object");
     assert.equal(typeof choice.risk, "string");
     assert.equal(typeof choice.requires_confirmation, "boolean");
     assert.equal(typeof choice.effect, "string");

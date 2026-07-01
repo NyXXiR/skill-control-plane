@@ -44,6 +44,7 @@ import {
   rolloutPlan,
   rolloutReport,
   rolloutRollback,
+  routeSkill,
   verifySources,
   variantLifecycleStatus,
   writeLockfile
@@ -59,6 +60,38 @@ import { runInitCommand, runUninstallCommand } from "./lifecycle-cli.mjs";
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 const APPLY_ACTION_VALUE_OPTIONS = new Set(["workflow", "dir", "config", "skills", "out", "skillboard-bin"]);
+const COMMAND_USAGE = new Map([
+  ["uninstall", ["uninstall [--dir <path>] [--dry-run] [--remove-config|--reset-config] [--remove-reports] [--remove-hooks] [--keep-empty-dirs]"]],
+  [
+    "inventory",
+    [
+      "inventory refresh [--dir <path>] [--config <path>] [--scan-root <dir>[,<dir>]] [--dry-run] [--json]",
+      "inventory detect --unit <id> --config <path> [--install-output <path>] [--config-file a,b] [--source <value>] [--kind <kind>] [--scope <scope>] [--dry-run] [--json]"
+    ]
+  ],
+  ["sources", ["sources refresh [--dir <path>] [--config <path>] [--unit <id>[,<id>]] [--cache-dir <dir>] [--dry-run] [--json]"]],
+  ["import", ["import --profile <id-or-path> --source-root <dir> [--profile-dirs a,b] [--out <path>]", "import --profile <id-or-path> --source-root <dir> --config <path> --merge [--replace] [--dry-run]"]],
+  ["scan", ["scan --config <path>"]],
+  ["check", ["check --config <path> --skills <dir>"]],
+  ["list", ["list [skills|workflows|harnesses|install-units] --config <path> --skills <dir> [--workflow <name>] [--json]"]],
+  ["explain", ["explain <skill-id> --config <path> --skills <dir> [--json]"]],
+  ["can-use", ["can-use <skill-id> --workflow <name> --config <path> --skills <dir> [--json]"]],
+  ["audit", ["audit sources --config <path> --skills <dir> [--verify] [--json]"]],
+  ["rollout", ["rollout [audit|plan|apply|rollback|report] [--dir <path>] [--config <path>] [--skills <dir>] [--transaction <id>] [--json]"]],
+  ["hook", ["hook install --workflow <name> --config <path> --skills <dir> [--out <path>] [--skillboard-bin <path>] [--dry-run] [--json]"]],
+  ["lock", ["lock write --config <path> --skills <dir> [--out <path>] [--replace] [--allow-unverified] [--json]"]],
+  ["review", ["review install-unit <unit-id> [--trust-level trusted|reviewed|unreviewed|blocked] --config <path> --skills <dir> [--dry-run] [--json]"]],
+  ["add", ["add skill <skill-id> --path <relative-skill-path> --config <path> --skills <dir> [--status <status>] [--invocation <mode>] [--exposure <exposure>] [--category <name>] [--workflow <name>] [--dry-run] [--json]", "add workflow <workflow-name> --harness <harness-name> --config <path> --skills <dir> [--skill <id>[,<id>]] [--harness-status <status>] [--require-existing-harness] [--dry-run] [--json]", "add harness <harness-name> --config <path> --skills <dir> [--status <status>] [--command <cmd>[,<cmd>]] [--dry-run] [--json]"]],
+  ["variant", ["variant add <variant-id> --from <base-id> --capability <name> --workflow <name> --config <path> --skills <dir> [--path <relative-skill-path>] [--mode manual-only|router-only|workflow-auto] [--category <name>] [--owner-install-unit <unit-id>] [--dry-run] [--json]", "variant fork <variant-id> --from <base-id> --capability <name> --workflow <name> --path <relative-skill-path> --config <path> --skills <dir> [--adapted-for <label>] [--category <name>] [--owner-install-unit <unit-id>] [--dry-run] [--json]", "variant status <variant-id> --config <path> --skills <dir> [--json]", "variant approve <variant-id> --config <path> --skills <dir> [--mode manual-only|router-only|workflow-auto] [--dry-run] [--json]", "variant reset <variant-id> --to-base|--to-approved --config <path> --skills <dir> [--yes] [--dry-run] [--mode manual-only|router-only|workflow-auto] [--json]"]],
+  ["activate", ["activate <skill-id> --workflow <name> [--mode manual-only|router-only|workflow-auto] --config <path> --skills <dir> [--dry-run] [--json]"]],
+  ["block", ["block <skill-id> --workflow <name> --config <path> --skills <dir> [--dry-run] [--json]"]],
+  ["quarantine", ["quarantine <skill-id> --config <path> --skills <dir> [--dry-run] [--json]"]],
+  ["prefer", ["prefer <skill-id> --workflow <name> --capability <name> --config <path> --skills <dir> [--dry-run] [--json]"]],
+  ["remove", ["remove skill <skill-id> --config <path> --skills <dir> [--force] [--dry-run] [--json]"]],
+  ["dashboard", ["dashboard --config <path> --skills <dir> [--out <path>]"]],
+  ["reconcile", ["reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--out <path>]"]],
+  ["impact", ["impact disable <skill-id> --config <path> --skills <dir> [--out <path>] [--json]"]]
+]);
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2), process.stdout, process.stderr);
@@ -75,7 +108,13 @@ export async function main(argv, stdout, stderr) {
 
 async function run(argv, stdout, stderr) {
   const command = argv[0] ?? "help";
-  const options = parseOptions(argv.slice(1));
+  const commandArgs = argv.slice(1);
+  const options = parseOptions(commandArgs);
+  const help = selectedHelpText(command, commandArgs, options);
+  if (help !== null) {
+    stdout.write(help);
+    return 0;
+  }
   switch (command) {
     case "init":
       return await runInitCommand(options, stdout);
@@ -105,6 +144,8 @@ async function run(argv, stdout, stderr) {
       return await list(argv.slice(1), options, stdout);
     case "explain":
       return await explain(argv.slice(1), options, stdout);
+    case "route":
+      return await route(argv.slice(1), options, stdout);
     case "can-use":
       return await canUse(argv.slice(1), options, stdout);
     case "guard":
@@ -149,10 +190,23 @@ async function run(argv, stdout, stderr) {
       stdout.write(`${VERSION}\n`);
       return 0;
     default:
-      stderr.write(`Unknown command: ${command}\n`);
-      stdout.write(helpText());
+      stderr.write(`Unknown command: ${command}\nRun skillboard help for usage.\n`);
       return 1;
   }
+}
+
+function selectedHelpText(command, args, options) {
+  if (command === "help") {
+    const topic = positionalArgs(args)[0];
+    return topic === undefined ? helpText() : commandHelpText(topic) ?? helpText();
+  }
+  if (command === "--help" || command === "-h") {
+    return helpText();
+  }
+  if (options.get("help") === "true" || args.includes("-h")) {
+    return commandHelpText(command);
+  }
+  return null;
 }
 
 async function importProfile(options, stdout) {
@@ -342,6 +396,25 @@ async function explain(argv, options, stdout) {
   const workspace = await loadWorkspace({ configPath: configPath(options), skillsRoot: skillsRoot(options) });
   const result = explainSkill(workspace, skillId);
   writeOutput(stdout, result, options, () => renderExplain(result));
+  return 0;
+}
+
+async function route(argv, options, stdout) {
+  const intent = positionalArgs(argv).join(" ").trim();
+  const workflow = options.get("workflow");
+  if (intent.length === 0 || workflow === undefined) {
+    throw new Error("Usage: skillboard route <intent> --workflow <name>");
+  }
+  const config = configPath(options);
+  const skills = skillsRoot(options);
+  const workspace = await loadWorkspace({ configPath: config, skillsRoot: skills });
+  const result = routeSkill(workspace, {
+    intent,
+    workflow,
+    configPath: config,
+    skillsRoot: skills
+  });
+  writeOutput(stdout, result, options, () => renderRoute(result));
   return 0;
 }
 
@@ -937,8 +1010,19 @@ function renderImpact(result) {
     `- Affected workflows: ${formatList(result.affectedWorkflows)}`,
     `- Affected required outputs: ${formatList(result.affectedOutputs)}`,
     `- Alternatives: ${formatList(result.alternatives)}`,
+    `- Conflicting skills: ${formatList(result.conflictingSkills ?? [])}`,
+    `- Active conflicts: ${formatActiveConflicts(result.activeConflicts ?? [])}`,
     ""
   ].join("\n");
+}
+
+function formatActiveConflicts(entries) {
+  if (entries.length === 0) {
+    return "none";
+  }
+  return entries
+    .map((entry) => `\`${entry.workflow}:${entry.skill}<->${entry.conflictingSkill}\``)
+    .join(", ");
 }
 
 function configPath(options) {
@@ -1244,6 +1328,54 @@ function renderCanUse(result) {
   return lines.join("\n");
 }
 
+function renderRoute(result) {
+  const lines = [
+    `Intent: ${result.intent}`,
+    `Workflow: ${result.workflow}`,
+    `Match source: ${result.match_source}`,
+    `Matched capability: ${result.matched_capability ?? "none"}`,
+    `Matched skill: ${result.matched_skill ?? "none"}`,
+    `Confidence: ${result.confidence}`,
+    `Why: ${result.recommendation_reason}`,
+    `Matched terms: ${formatList(result.matched_terms)}`,
+    `Recommended skill: ${result.recommended_skill ?? "none"}`,
+    `Fallback skills: ${formatList(result.fallback_skills)}`
+  ];
+  if ((result.route_candidates ?? []).length > 0) {
+    lines.push("Route candidates:");
+    for (const candidate of result.route_candidates) {
+      lines.push(`- ${candidate.skill} (${routeCandidateStatus(candidate)})`);
+      if (!candidate.guard_allowed && candidate.guard_reasons.length > 0) {
+        lines.push(`  - ${candidate.guard_reasons[0]}`);
+      }
+    }
+  }
+  if (result.guard_command !== null) {
+    lines.push(`Guard: ${result.guard_command}`);
+  }
+  if (result.usage_disclosure !== null && result.usage_disclosure !== undefined) {
+    lines.push(`Disclosure: run the guard automatically, state at the start that ${result.recommended_skill} is being used, and state at completion that it was used. No extra user approval is needed when the guard allows it.`);
+    lines.push(`Say before use: "${result.usage_disclosure.start_message}"`);
+    lines.push(`Say after completion: "${result.usage_disclosure.finish_message}"`);
+  }
+  if (result.matched_capability === null) {
+    lines.push("Possible skills:");
+    for (const skill of result.possible_skills.slice(0, 5)) {
+      lines.push(`- ${skill.id} (${skill.category ?? "uncategorized"}, allowed=${skill.allowed})`);
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function routeCandidateStatus(candidate) {
+  return [
+    candidate.role,
+    candidate.selected ? "selected" : null,
+    candidate.guard_allowed ? "allowed" : "denied"
+  ].filter((value) => value !== null).join(", ");
+}
+
 function renderSourceAudit(result) {
   const lines = [
     `Source audit: ${result.ok ? "passed" : "failed"}`,
@@ -1366,7 +1498,7 @@ function helpText() {
     "  sources refresh [--dir <path>] [--config <path>] [--unit <id>[,<id>]] [--cache-dir <dir>] [--dry-run] [--json]",
     "  doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--summary] [--json]",
     "  status [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--summary] [--json]",
-    "  brief [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]",
+    "  brief [--workflow <name>] [--intent <request>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]",
     "  apply-action <action-id> [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--dry-run] [--yes] [--allow-destructive] [--json]",
     "  import --profile <id-or-path> --source-root <dir> [--profile-dirs a,b] [--out <path>]",
     "  import --profile <id-or-path> --source-root <dir> --config <path> --merge [--replace] [--dry-run]",
@@ -1374,6 +1506,7 @@ function helpText() {
     "  check --config <path> --skills <dir>",
     "  list [skills|workflows|harnesses|install-units] --config <path> --skills <dir> [--workflow <name>] [--json]",
     "  explain <skill-id> --config <path> --skills <dir> [--json]",
+    "  route <intent> --workflow <name> --config <path> --skills <dir> [--json]",
     "  can-use <skill-id> --workflow <name> --config <path> --skills <dir> [--json]",
     "  guard use <skill-id> --workflow <name> --config <path> --skills <dir> [--json]",
     "  audit sources --config <path> --skills <dir> [--verify] [--json]",
@@ -1398,12 +1531,185 @@ function helpText() {
     "  reconcile --config <path> --skills <dir> [--actual-harnesses a,b] [--out <path>]",
     "  impact disable <skill-id> --config <path> --skills <dir> [--out <path>] [--json]",
     "",
-    "AI/automation approval loop:",
-    "  Translate a user's skill request into the current brief: skillboard brief --json --config <path> --skills <dir> [--workflow <name>] [--include-actions].",
-    "  Pick one current action id from that brief and ask the user for one confirmation.",
+    "AI/automation control loop:",
+    "  For an already-allowed skill, disclose the selected skill at start and completion; do not ask for another approval.",
+    "  Translate a user's skill request into the current brief: skillboard brief --json --config <path> --skills <dir> [--workflow <name>] [--intent <request>] [--include-actions].",
+    "  If a policy-changing action is needed, pick one current action id from that brief and ask the user for one confirmation.",
     "  Apply one current action with skillboard apply-action <action-id> --config <path> --skills <dir> [--workflow <name>] --yes --json.",
-    "  Read the returned post-apply brief, then run skillboard guard use before invocation.",
+    "  Read the returned post-apply brief, then run skillboard guard use automatically before invocation.",
     "  apply-action re-resolves current actions; do not use cached/stale ids, multiple actions, or raw action-card shell text as the primary apply path.",
+    ""
+  ].join("\n");
+}
+
+function commandHelpText(command) {
+  if (command === "brief") {
+    return briefHelpText();
+  }
+  if (command === "init") {
+    return initHelpText();
+  }
+  if (command === "doctor" || command === "status") {
+    return doctorHelpText();
+  }
+  if (command === "route") {
+    return routeHelpText();
+  }
+  if (command === "guard") {
+    return guardHelpText();
+  }
+  if (command === "apply-action") {
+    return applyActionHelpText();
+  }
+  const usage = COMMAND_USAGE.get(command);
+  return usage === undefined ? null : genericCommandHelpText(usage);
+}
+
+function genericCommandHelpText(usageLines) {
+  return [
+    ...usageLines.map((line) => `Usage: skillboard ${line}`),
+    "",
+    "This help is read-only. It does not load config or change project files.",
+    "Run skillboard help for the full command catalog.",
+    ""
+  ].join("\n");
+}
+
+function initHelpText() {
+  return [
+    "Usage: skillboard init [--dir <path>] [--scan-root <dir>[,<dir>]] [--no-scan-installed]",
+    "",
+    "Creates the local SkillBoard control files for a project.",
+    "Use it once per project before asking the AI which skills it can use.",
+    "",
+    "Options:",
+    "  --dir <path>              Project root to initialize; defaults to the current directory.",
+    "  --scan-root <dir>[,<dir>] Add extra skill roots to scan during setup.",
+    "  --no-scan-installed       Create the files without scanning installed agent skills.",
+    "",
+    "What changes:",
+    "  Writes skillboard.config.yaml, skills/, .skillboard/, AGENTS.md, and CLAUDE.md as needed.",
+    "  Imports trusted user-local skills as on-request skills.",
+    "  Keeps runtime, plugin, system, and external skills quarantined until reviewed.",
+    "",
+    "Next:",
+    "  Run skillboard doctor --summary.",
+    "  Ask your AI: \"What skills can you use in this project?\"",
+    ""
+  ].join("\n");
+}
+
+function doctorHelpText() {
+  return [
+    "Usage: skillboard doctor [--dir <path>] [--config <path>] [--skills <dir>] [--verify] [--strict] [--summary] [--json]",
+    "",
+    "Checks whether a SkillBoard project is ready to use.",
+    "The status command is an alias for doctor.",
+    "",
+    "Options:",
+    "  --dir <path>       Project root to check; defaults to the current directory.",
+    "  --config <path>    Use a specific skillboard.config.yaml.",
+    "  --skills <dir>     Use a specific skills directory.",
+    "  --verify           Verify local source/cache digests when available.",
+    "  --strict           Return a failing exit code for review-needed safe mode.",
+    "  --summary          Print a short human summary.",
+    "  --json             Print an agent-readable payload.",
+    "",
+    "Use this after init and before trusting new skill sources.",
+    ""
+  ].join("\n");
+}
+
+function briefHelpText() {
+  return [
+    "Usage: skillboard brief [--workflow <name>] [--intent <request>] [--dir <path>] [--config <path>] [--skills <dir>] [--include-actions] [--verbose] [--json]",
+    "",
+    "Reads the current SkillBoard brief without changing project files.",
+    "Use it when a user asks what skills the AI can use, which skill fits a request, or what needs approval.",
+    "",
+    "Options:",
+    "  --workflow <name>     Evaluate one workflow.",
+    "  --intent <request>    Add a natural-language request so SkillBoard can suggest a skill.",
+    "  --dir <path>          Use a project root; defaults to the current directory.",
+    "  --config <path>       Use a specific skillboard.config.yaml.",
+    "  --skills <dir>        Use a specific skills directory.",
+    "  --include-actions     Include current action ids in JSON output.",
+    "  --verbose             Show full lists instead of compact previews.",
+    "  --json                Print an agent-readable payload.",
+    "",
+    "AI use:",
+    "  Read this before answering availability questions.",
+    "  Run skillboard guard use <skill-id> --workflow <name> before invoking a skill.",
+    "  If guard allows use, disclose the skill at the start and completion; do not ask for another approval.",
+    "  If a policy change is needed, ask the user to approve one current action id from this brief.",
+    ""
+  ].join("\n");
+}
+
+function routeHelpText() {
+  return [
+    "Usage: skillboard route <intent> --workflow <name> [--config <path>] [--skills <dir>] [--json]",
+    "",
+    "Suggests the best currently allowed skill for a user request.",
+    "Use it when the AI needs a skill recommendation without changing policy.",
+    "",
+    "Options:",
+    "  <intent>           Natural-language request, such as \"write tests first\".",
+    "  --workflow <name>  Workflow to route within.",
+    "  --config <path>    Use a specific skillboard.config.yaml.",
+    "  --skills <dir>     Use a specific skills directory.",
+    "  --json             Print an agent-readable payload.",
+    "",
+    "AI use:",
+    "  If a skill is recommended, run the guard before invoking it.",
+    "  If no skill matches, ask a clarifying question instead of guessing.",
+    ""
+  ].join("\n");
+}
+
+function guardHelpText() {
+  return [
+    "Usage: skillboard guard use <skill-id> --workflow <name> [--config <path>] [--skills <dir>] [--json]",
+    "",
+    "Checks whether one skill may be used right now.",
+    "Run this immediately before the AI invokes a skill.",
+    "",
+    "Options:",
+    "  use                Guard a skill invocation.",
+    "  <skill-id>         Skill id to check.",
+    "  --workflow <name>  Workflow that will use the skill.",
+    "  --config <path>    Use a specific skillboard.config.yaml.",
+    "  --skills <dir>     Use a specific skills directory.",
+    "  --json             Print an agent-readable payload.",
+    "",
+    "AI use:",
+    "  If allowed, disclose the skill at the start and completion.",
+    "  If denied, do not invoke the skill. Explain the reason or ask for the needed policy change.",
+    ""
+  ].join("\n");
+}
+
+function applyActionHelpText() {
+  return [
+    "Usage: skillboard apply-action <action-id> [--workflow <name>] [--dir <path>] [--config <path>] [--skills <dir>] [--dry-run] [--yes] [--allow-destructive] [--json]",
+    "",
+    "Applies one current action id from the latest brief.",
+    "Use it only after the user confirms a policy-changing action.",
+    "",
+    "Options:",
+    "  <action-id>             One action id from the current brief.",
+    "  --workflow <name>       Workflow for workflow-scoped actions.",
+    "  --dir <path>            Project root; defaults to the current directory.",
+    "  --config <path>         Use a specific skillboard.config.yaml.",
+    "  --skills <dir>          Use a specific skills directory.",
+    "  --dry-run               Preview the action without writing changes.",
+    "  --yes                   Apply the action after user confirmation.",
+    "  --allow-destructive     Permit destructive reset or cleanup actions.",
+    "  --json                  Print an agent-readable payload.",
+    "",
+    "AI use:",
+    "  Apply exactly one current action id.",
+    "  Read the returned post-apply brief before making another availability decision.",
     ""
   ].join("\n");
 }

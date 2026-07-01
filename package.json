@@ -1,10 +1,13 @@
 {
   "name": "agent-skillboard",
   "version": "0.1.2",
-  "description": "Know, gate, and audit which AI agent skills can run in each workflow.",
+  "description": "Let AI agents pick and use allowed skills in each workflow.",
   "keywords": [
     "ai-agent",
+    "agent-skills",
     "skills",
+    "skill-routing",
+    "workflow",
     "codex",
     "claude-code",
     "policy"
@@ -21,7 +24,8 @@
   "files": [
     "bin",
     "src",
-    "docs",
+    "docs/*.md",
+    "docs/plans",
     "examples",
     "profiles",
     "README.md",

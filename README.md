@@ -1,16 +1,27 @@
 # SkillBoard
 
-Ask your AI which skills it can safely use before it uses them.
+Let your AI use allowed skills without interruption, with a clear record of
+which skills it used.
 
 Start with normal requests:
 
 - "What skills can you use in this project?"
+- "Which skill should you use to write tests first?"
 - "Can you make `anthropic.docx` available for this workflow?"
 - "Why is this skill blocked?"
 
-Your AI runs SkillBoard behind the scenes, reads the current brief, asks before
-applying one current action, and checks the guard before invoking a skill. You
-do not need to memorize the SkillBoard command loop.
+Your AI runs SkillBoard behind the scenes, reads the current brief, checks the
+guard automatically before invoking an allowed skill, and asks only before
+policy-changing actions. For already-allowed skills, it should say which skill
+it is about to use and which skill it used, not interrupt you for another
+approval. That disclosure is an audit trace, not a permission prompt. You do
+not need to memorize the SkillBoard command loop.
+
+A normal allowed-skill turn can look like this:
+
+- You: "Which skill should you use to write tests first?"
+- AI: "I will use matt.tdd for this request."
+- AI: "I used matt.tdd for this request."
 
 SkillBoard is a control board for AI-agent skills. It turns installed
 `SKILL.md` files, plugin skills, hooks, MCP servers, harnesses, and local skill
@@ -45,7 +56,9 @@ Same fixture, different answer:
 
 That gap is the product. SkillBoard separates `installed` from `allowed`,
 checks policy health, and gives agents a brief they can use without guessing
-from raw `SKILL.md` files.
+from raw `SKILL.md` files. The same proof also routes "write tests before
+implementation" to `matt.tdd`, returns `private.tdd-work-continuity` as the
+fallback, and gives the AI exact start and finish disclosure text.
 
 See [Tested Value Proof](#tested-value-proof) for the executable proof.
 
@@ -58,21 +71,18 @@ from memory or raw skill files.
 AI/automation/operator details:
 
 ```bash
-npx agent-skillboard init
-npx agent-skillboard brief
-npx agent-skillboard doctor --summary
+npx --yes --package agent-skillboard skillboard init
+npx --yes --package agent-skillboard skillboard doctor --summary
+npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>
 ```
 
 `init` creates the local control-plane files, scans known local skill roots,
-and writes agent bridge instructions. Trusted user-local skills start as
-manual-only. Runtime, plugin, and external skills stay quarantined or blocked
-until reviewed.
-
-For CI, scripts, or operator runbooks, use the explicit package/binary spelling:
-
-```bash
-npx --yes --package agent-skillboard skillboard init
-```
+and writes agent bridge instructions. It prints the workflows it found and a
+copyable workflow-scoped `brief` command. If `init` does not print a workflow,
+run the unscoped `brief` command it prints instead. Trusted user-local skills
+start as manual-only. Runtime, plugin, and external skills stay quarantined or
+blocked until reviewed. The explicit package/binary spelling avoids an extra npx
+install prompt and keeps the `skillboard` executable name clear.
 
 See [docs/install.md](docs/install.md) for global installs, `--dir`, GitHub
 builds, clone-based development, Hermes bridge setup, refresh, and uninstall.
@@ -81,7 +91,8 @@ builds, clone-based development, Hermes bridge setup, refresh, and uninstall.
 
 - Inventory that separates installed skills from callable skills.
 - Workflow-scoped policy instead of global "everything is active" behavior.
-- `brief`, `can-use`, and `guard use` surfaces for AI-mediated availability.
+- `brief`, `route`, `can-use`, and `guard use` surfaces for AI-mediated selection and availability.
+- Workflow conflict checks so overlapping skills cannot quietly degrade an answer.
 - Action cards that apply one approved policy change, then re-resolve state.
 - Source and install-unit review for plugins, hooks, MCP servers, harnesses,
   commands, LSPs, and package-manager dependencies.
@@ -141,6 +152,7 @@ fixtures, and assertions.
 
 - [Install and bootstrap](docs/install.md)
 - [First-time control flow](docs/user-flow.md)
+- [Capability routing](docs/routing.md)
 - [Command and config reference](docs/reference.md)
 - [Policy model](docs/policy-model.md)
 - [Capabilities](docs/capabilities.md)

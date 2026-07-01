@@ -42,6 +42,26 @@ function assertInitNextCommand(stdout, command, dir, suffix = "") {
   assert.ok(line, `expected init Next command ${command} for ${dir}${suffix}\n${stdout}`);
 }
 
+function assertInitNextWorkflowCommand(stdout, workflow, dir, suffix = "") {
+  const prefix = `- node bin/skillboard.mjs brief --workflow ${workflow} --dir `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes(dir)
+      && candidate.endsWith(suffix);
+  });
+  assert.ok(line, `expected init Next workflow brief for ${workflow} in ${dir}${suffix}\n${stdout}`);
+}
+
+function assertInitNextWorkflowIntentCommand(stdout, workflow, dir) {
+  const prefix = `- node bin/skillboard.mjs brief --workflow ${workflow} --intent `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes("'write tests before implementation'")
+      && candidate.includes(dir);
+  });
+  assert.ok(line, `expected init Next workflow intent brief for ${workflow} in ${dir}\n${stdout}`);
+}
+
 function variantAddCliConfig(options = {}) {
   return `version: 1
 defaults:
@@ -253,10 +273,19 @@ test("cli init bootstraps config and agent bridge files", async () => {
     assert.match(agents, /BEGIN SKILLBOARD/);
     assert.match(agents, /answer skill availability questions from SkillBoard/i);
     assert.match(agents, /translate user intent into current action ids/i);
+    assert.match(agents, /brief --intent <request>/i);
+    assert.match(agents, /assistant_guidance\.route/);
+    assert.match(agents, /recommended_skill/);
+    assert.match(agents, /fallback_skills/);
+    assert.match(agents, /route_candidates/);
+    assert.match(agents, /guard_command/);
+    assert.match(agents, /I will use <skill-id> for this request\./);
+    assert.match(agents, /I used <skill-id> for this request\./);
+    assert.match(agents, /ask a clarifying question/i);
     assert.match(agents, /ask for one confirmation/i);
     assert.match(agents, /apply one current action/i);
     assert.match(agents, /reread the post-apply brief/i);
-    assert.match(agents, /guard before invocation/i);
+    assert.match(agents, /run the guard automatically before invocation/i);
     assert.match(agents, /skillboard brief --json/);
     assert.match(agents, /skillboard apply-action <action-id>/);
     assert.match(agents, /skillboard guard use/);
@@ -269,6 +298,9 @@ test("cli init bootstraps config and agent bridge files", async () => {
     assert.match(agents, /do not infer availability from `SKILL\.md` bodies/i);
     assert.match(claude, /BEGIN SKILLBOARD/);
     assert.match(claude, /translate user intent into current action ids/i);
+    assert.match(claude, /brief --intent <request>/i);
+    assert.match(claude, /assistant_guidance\.route/);
+    assert.match(claude, /route_candidates/);
     assert.match(profilesReadme, /source profiles/);
     assert.match(hooksReadme, /skillboard hook install/);
     assert.equal(agents.match(/BEGIN SKILLBOARD/g).length, 1);
@@ -1281,8 +1313,13 @@ test("cli init scans installed local user skills into manual workflow state", as
     assert.match(init.stdout, /manual-only skills available/);
     assert.match(init.stdout, /blocked\/quarantined for safety/);
     assert.match(init.stdout, /Next:/);
+    assert.match(init.stdout, /Ask your AI: "What skills can you use in this project\?"/);
     assertInitNextCommand(init.stdout, "doctor", project, " --summary");
-    assertInitNextCommand(init.stdout, "brief", project);
+    assert.match(init.stdout, /Choose a workflow: `codex-local-manual`/);
+    assert.match(init.stdout, /Example workflow brief: `codex-local-manual`/);
+    assertInitNextWorkflowCommand(init.stdout, "codex-local-manual", project);
+    assert.match(init.stdout, /Example task routing: "write tests before implementation"/);
+    assertInitNextWorkflowIntentCommand(init.stdout, "codex-local-manual", project);
     assert.match(config, /system-helper:/);
     assert.match(config, /local-helper:/);
     assert.match(config, /demo:review:/);
@@ -1306,6 +1343,93 @@ test("cli init scans installed local user skills into manual workflow state", as
     assert.match(units.stdout, /codex\.plugin\.demo\tplugin\texternal-package.*risk=high/);
     assert.equal(localUsePayload.allowed, true);
     assert.equal(localUsePayload.automaticAllowed, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli init scanned local skills remain routable by SKILL description metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-route-metadata-test-"));
+  try {
+    const home = join(root, "home");
+    const project = join(root, "project");
+    const codexHome = join(home, ".codex");
+    await mkdir(join(codexHome, "skills", "test-first"), { recursive: true });
+    await mkdir(join(codexHome, "skills", "docs-writer"), { recursive: true });
+    await writeFile(
+      join(codexHome, "skills", "test-first", "SKILL.md"),
+      "---\nname: test-first\ndescription: Write failing tests before implementation and keep a red green refactor loop.\n---\n# test-first\n",
+      "utf8"
+    );
+    await writeFile(
+      join(codexHome, "skills", "docs-writer", "SKILL.md"),
+      "---\nname: docs-writer\ndescription: Write install guides, README copy, and quick starts.\n---\n# docs-writer\n",
+      "utf8"
+    );
+
+    const env = testAgentEnv(home, { CODEX_HOME: codexHome });
+    await execFileAsync(process.execPath, ["bin/skillboard.mjs", "init", "--dir", project], { env });
+    const configPath = join(project, "skillboard.config.yaml");
+    const skillsRoot = join(project, "skills");
+    const brief = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "brief",
+      "--intent",
+      "write failing tests before implementation",
+      "--workflow",
+      "codex-local-manual",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--json"
+    ], { env });
+    const payload = JSON.parse(brief.stdout);
+
+    assert.equal(payload.assistant_guidance.route.match_source, "skill-metadata");
+    assert.equal(payload.assistant_guidance.route.recommended_skill, "test-first");
+    assert.ok(payload.assistant_guidance.route.matched_terms.includes("implementation"));
+    assert.ok(payload.assistant_guidance.route.matched_terms.includes("failing"));
+    assert.match(payload.assistant_guidance.route.recommendation_reason, /SKILL\.md description/);
+    assert.equal(payload.assistant_guidance.route.guard_allowed, true);
+
+    const textBrief = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "brief",
+      "--intent",
+      "write failing tests before implementation",
+      "--workflow",
+      "codex-local-manual",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot
+    ], { env });
+    assert.match(
+      textBrief.stdout,
+      /Why: Matched workflow skill metadata for test-first through .*SKILL\.md description .*recommended test-first because the guard allows test-first\./
+    );
+    assert.match(
+      textBrief.stdout,
+      /Disclosure: run the guard automatically, state at the start that `test-first` is being used, and state at completion that it was used\. No extra user approval is needed when the guard allows it\./
+    );
+
+    const unrelated = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "organize a team calendar",
+      "--workflow",
+      "codex-local-manual",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--json"
+    ], { env });
+    const unrelatedPayload = JSON.parse(unrelated.stdout);
+    assert.equal(unrelatedPayload.match_source, "none");
+    assert.equal(unrelatedPayload.recommended_skill, null);
+    assert.deepEqual(unrelatedPayload.matched_terms, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1696,6 +1820,637 @@ test("cli list, explain, and can-use expose source-aware control state", async (
   assert.equal(deniedError.code, 2);
   assert.equal(JSON.parse(deniedError.stdout).allowed, false);
 });
+
+test("cli route recommends a workflow skill from user intent", async () => {
+  const result = await execFileAsync(process.execPath, [
+    "bin/skillboard.mjs",
+    "route",
+    "write tests before implementation",
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow",
+    "--json"
+  ]);
+  const payload = JSON.parse(result.stdout);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.intent, "write tests before implementation");
+  assert.equal(payload.workflow, "codex-night-workflow");
+  assert.equal(payload.matched_capability, "test-first-implementation");
+  assert.equal(payload.match_source, "capability");
+  assert.equal(payload.confidence, "high");
+  assert.equal(payload.recommended_skill, "matt.tdd");
+  assert.deepEqual(payload.fallback_skills, ["private.tdd-work-continuity"]);
+  assert.ok(payload.matched_terms.includes("test"));
+  assert.match(payload.recommendation_reason, /Matched capability test-first-implementation/);
+  assert.match(payload.recommendation_reason, /guard allows matt\.tdd/);
+  assert.ok(!payload.fallback_skills.includes("wshobson.python-testing"));
+  assert.equal(payload.usage_disclosure.confirmation_required, false);
+  assert.match(payload.usage_disclosure.start, /State at the start that matt\.tdd is being used/);
+  assert.match(payload.usage_disclosure.finish, /State at completion that matt\.tdd was used/);
+  assert.equal(payload.usage_disclosure.start_message, "I will use matt.tdd for this request.");
+  assert.equal(payload.usage_disclosure.finish_message, "I used matt.tdd for this request.");
+  assert.match(payload.guard_command, /skillboard guard use matt\.tdd/);
+  assert.match(payload.guard_command, /--workflow codex-night-workflow/);
+  assert.equal(payload.guard.allowed, true);
+
+  const text = await execFileAsync(process.execPath, [
+    "bin/skillboard.mjs",
+    "route",
+    "write tests before implementation",
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow"
+  ]);
+  assert.match(text.stdout, /Match source: capability/);
+  assert.match(text.stdout, /Why: Matched capability test-first-implementation/);
+  assert.match(text.stdout, /Matched terms: `implementation`, `test`/);
+  assert.match(text.stdout, /Disclosure: run the guard automatically, state at the start that matt\.tdd is being used/);
+  assert.match(text.stdout, /Say before use: "I will use matt\.tdd for this request\."/);
+  assert.match(text.stdout, /Say after completion: "I used matt\.tdd for this request\."/);
+});
+
+test("cli route accepts unquoted multi-word intent", async () => {
+  const result = await execFileAsync(process.execPath, [
+    "bin/skillboard.mjs",
+    "route",
+    "write",
+    "tests",
+    "before",
+    "implementation",
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow",
+    "--json"
+  ]);
+  const payload = JSON.parse(result.stdout);
+
+  assert.equal(payload.intent, "write tests before implementation");
+  assert.equal(payload.matched_capability, "test-first-implementation");
+  assert.equal(payload.match_source, "capability");
+  assert.equal(payload.recommended_skill, "matt.tdd");
+});
+
+test("cli route can recommend a workflow skill from SKILL description metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-route-description-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "release-notes"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "release-notes", "SKILL.md"),
+      "---\nname: release-helper\ndescription: Draft release notes and changelog summaries.\n---\n# release-helper\n",
+      "utf8"
+    );
+    await writeFile(
+      configPath,
+      `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  user.release-helper:
+    path: release-notes
+    status: active
+    invocation: router-only
+    exposure: exported
+    category: writing
+capabilities: {}
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - user.release-helper
+    blocked_skills: []
+install_units: {}
+`,
+      "utf8"
+    );
+
+    const result = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "summarize the changelog",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(payload.matched_capability, null);
+    assert.equal(payload.matched_skill, "user.release-helper");
+    assert.equal(payload.match_source, "skill-metadata");
+    assert.equal(payload.recommended_skill, "user.release-helper");
+    assert.ok(payload.matched_terms.includes("changelog"));
+    assert.match(payload.recommendation_reason, /Matched workflow skill metadata/);
+    assert.match(payload.recommendation_reason, /SKILL\.md description/);
+    assert.equal(payload.guard.allowed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli route with denied guard does not present no-approval disclosure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-route-denied-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "user-test-first"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "user-test-first", "SKILL.md"),
+      "---\nname: test-first\ndescription: Write tests before implementation.\n---\n# test-first\n",
+      "utf8"
+    );
+    await writeFile(configPath, deniedRouteConfig(), "utf8");
+
+    const result = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "write tests before implementation",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(payload.recommended_skill, "user.test-first");
+    assert.equal(payload.guard.allowed, false);
+    assert.equal(payload.usage_disclosure, null);
+    assert.match(payload.guard.reasons.join("\n"), /blocks skill user\.test-first/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli route explains preferred denied fallback allowed decisions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-route-fallback-clarity-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "vendor-test-first"), { recursive: true });
+    await mkdir(join(skillsRoot, "user-tdd"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "vendor-test-first", "SKILL.md"),
+      "---\nname: vendor-test-first\ndescription: Write tests before implementation.\n---\n# vendor-test-first\n",
+      "utf8"
+    );
+    await writeFile(
+      join(skillsRoot, "user-tdd", "SKILL.md"),
+      "---\nname: user-tdd\ndescription: Write tests before implementation with local project conventions.\n---\n# user-tdd\n",
+      "utf8"
+    );
+    await writeFile(configPath, preferredDeniedFallbackAllowedRouteConfig(), "utf8");
+
+    const result = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "write tests before implementation",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(payload.matched_capability, "test-first-implementation");
+    assert.equal(payload.recommended_skill, "user.tdd");
+    assert.deepEqual(payload.fallback_skills, []);
+    assert.equal(payload.guard.allowed, true);
+    assert.deepEqual(payload.route_candidates.map((candidate) => ({
+      skill: candidate.skill,
+      role: candidate.role,
+      selected: candidate.selected,
+      guard_allowed: candidate.guard_allowed
+    })), [
+      {
+        skill: "vendor.test-first",
+        role: "preferred",
+        selected: false,
+        guard_allowed: false
+      },
+      {
+        skill: "user.tdd",
+        role: "fallback",
+        selected: true,
+        guard_allowed: true
+      }
+    ]);
+    assert.match(payload.route_candidates[0].guard_reasons.join("\n"), /unreviewed non-user source vendor\.skills/);
+
+    const text = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "write tests before implementation",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow"
+    ]);
+    assert.match(text.stdout, /Route candidates:/);
+    assert.match(text.stdout, /Fallback skills: none/);
+    assert.match(text.stdout, /vendor\.test-first .*preferred, denied/);
+    assert.match(text.stdout, /user\.tdd .*fallback, selected, allowed/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli route uses skill metadata to break overlapping capability ties", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-route-overlap-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "vendor-test-first"), { recursive: true });
+    await mkdir(join(skillsRoot, "user-tdd"), { recursive: true });
+    await mkdir(join(skillsRoot, "docs-handoff"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "vendor-test-first", "SKILL.md"),
+      "---\nname: vendor-test-first\ndescription: Complex routing bug fixes, tests, implementation slices, and review evidence.\n---\n# vendor-test-first\n",
+      "utf8"
+    );
+    await writeFile(
+      join(skillsRoot, "user-tdd", "SKILL.md"),
+      "---\nname: user-tdd\ndescription: Local test-first routing bug fixes, regression tests, implementation slices, and review evidence.\n---\n# user-tdd\n",
+      "utf8"
+    );
+    await writeFile(
+      join(skillsRoot, "docs-handoff", "SKILL.md"),
+      "---\nname: docs-handoff\ndescription: Handoff notes and resumable plan updates.\n---\n# docs-handoff\n",
+      "utf8"
+    );
+    await writeFile(configPath, overlappingCapabilityRouteConfig(), "utf8");
+
+    const result = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "route",
+      "Fix a routing bug with tests, keep a handoff plan, and prepare review evidence",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(payload.matched_capability, "test-first-implementation");
+    assert.equal(payload.recommended_skill, "user.tdd");
+    assert.equal(payload.guard.allowed, true);
+    assert.ok(payload.matched_terms.includes("bug"));
+    assert.ok(payload.matched_terms.includes("test"));
+    assert.deepEqual(payload.route_candidates.map((candidate) => ({
+      skill: candidate.skill,
+      role: candidate.role,
+      selected: candidate.selected,
+      guard_allowed: candidate.guard_allowed
+    })), [
+      {
+        skill: "vendor.test-first",
+        role: "preferred",
+        selected: false,
+        guard_allowed: false
+      },
+      {
+        skill: "user.tdd",
+        role: "fallback",
+        selected: true,
+        guard_allowed: true
+      }
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cli route returns clarification-friendly no-match JSON", async () => {
+  const result = await execFileAsync(process.execPath, [
+    "bin/skillboard.mjs",
+    "route",
+    "draw a logo",
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow",
+    "--json"
+  ]);
+  const payload = JSON.parse(result.stdout);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.matched_capability, null);
+  assert.equal(payload.match_source, "none");
+  assert.equal(payload.confidence, "none");
+  assert.equal(payload.recommended_skill, null);
+  assert.deepEqual(payload.matched_terms, []);
+  assert.match(payload.recommendation_reason, /No workflow capability or skill metadata matched/);
+  assert.equal(payload.guard_command, null);
+  assert.ok(payload.possible_skills.some((skill) => skill.id === "matt.tdd"));
+});
+
+test("cli guard, brief, and impact surface active workflow conflicts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-conflict-runtime-cli-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await writeSkill(join(skillsRoot, "alpha"), "skill.alpha");
+    await writeSkill(join(skillsRoot, "beta"), "skill.beta");
+    await writeFile(configPath, conflictRuntimeConfig(), "utf8");
+    const baseArgs = ["--config", configPath, "--skills", skillsRoot];
+
+    let guardError;
+    try {
+      await execFileAsync(process.execPath, [
+        "bin/skillboard.mjs",
+        "guard",
+        "use",
+        "skill.alpha",
+        "--workflow",
+        "daily-workflow",
+        ...baseArgs,
+        "--json"
+      ]);
+    } catch (error) {
+      guardError = error;
+    }
+    assert.equal(guardError.code, 2);
+    const guardPayload = JSON.parse(guardError.stdout);
+    assert.equal(guardPayload.allowed, false);
+    assert.match(guardPayload.reasons.join("\n"), /Skill skill\.alpha conflicts with active skill skill\.beta in workflow daily-workflow/);
+
+    let briefError;
+    try {
+      await execFileAsync(process.execPath, [
+        "bin/skillboard.mjs",
+        "brief",
+        "--workflow",
+        "daily-workflow",
+        ...baseArgs,
+        "--json"
+      ]);
+    } catch (error) {
+      briefError = error;
+    }
+    assert.equal(briefError.code, 1);
+    const briefPayload = JSON.parse(briefError.stdout);
+    const alpha = briefPayload.skills.blocked.find((skill) => skill.id === "skill.alpha");
+    assert.match(alpha.reason, /conflicts with active skill skill\.beta/);
+
+    const impact = await execFileAsync(process.execPath, [
+      "bin/skillboard.mjs",
+      "impact",
+      "disable",
+      "skill.alpha",
+      ...baseArgs,
+      "--json"
+    ]);
+    const impactPayload = JSON.parse(impact.stdout);
+    assert.deepEqual(impactPayload.conflictingSkills, ["skill.beta"]);
+    assert.deepEqual(impactPayload.activeConflicts, [
+      {
+        workflow: "daily-workflow",
+        skill: "skill.alpha",
+        conflictingSkill: "skill.beta"
+      }
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+function deniedRouteConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  user.test-first:
+    path: user-test-first
+    status: active
+    invocation: workflow-auto
+    exposure: exported
+    category: testing
+capabilities: {}
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - user.test-first
+    blocked_skills:
+      - user.test-first
+install_units: {}
+`;
+}
+
+function preferredDeniedFallbackAllowedRouteConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  vendor.test-first:
+    path: vendor-test-first
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: testing
+    owner_install_unit: vendor.skills
+  user.tdd:
+    path: user-tdd
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: testing
+capabilities:
+  test-first-implementation:
+    canonical: vendor.test-first
+    alternatives:
+      - user.tdd
+    default_policy: manual-only
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - vendor.test-first
+      - user.tdd
+    blocked_skills: []
+    required_capabilities:
+      test-first-implementation:
+        preferred: vendor.test-first
+        fallback:
+          - user.tdd
+        policy: manual-only
+install_units:
+  vendor.skills:
+    kind: marketplace
+    source: npx skills add vendor/test-first
+    scope: user-global
+    provided_components:
+      - skills
+    components:
+      skills:
+        - vendor.test-first
+    enabled: true
+    trust_level: unreviewed
+    permission_risk: medium
+    rollback: reinstall
+`;
+}
+
+function overlappingCapabilityRouteConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  vendor.test-first:
+    path: vendor-test-first
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: engineering
+    owner_install_unit: vendor.skills
+  user.tdd:
+    path: user-tdd
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: engineering
+  user.docs-handoff:
+    path: docs-handoff
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: handoff
+capabilities:
+  test-first-implementation:
+    canonical: vendor.test-first
+    alternatives:
+      - user.tdd
+    default_policy: manual-only
+  handoff-continuity:
+    canonical: user.docs-handoff
+    alternatives: []
+    default_policy: manual-only
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - vendor.test-first
+      - user.tdd
+      - user.docs-handoff
+    blocked_skills: []
+    required_capabilities:
+      test-first-implementation:
+        preferred: vendor.test-first
+        fallback:
+          - user.tdd
+        policy: manual-only
+      handoff-continuity:
+        preferred: user.docs-handoff
+        fallback: []
+        policy: manual-only
+install_units:
+  vendor.skills:
+    kind: marketplace
+    source: npx skills add vendor/test-first
+    scope: user-global
+    provided_components:
+      - skills
+    components:
+      skills:
+        - vendor.test-first
+    enabled: true
+    trust_level: unreviewed
+    permission_risk: medium
+    rollback: reinstall
+`;
+}
+
+function conflictRuntimeConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  skill.alpha:
+    path: alpha
+    status: active
+    invocation: workflow-auto
+    exposure: exported
+    category: testing
+    conflicts_with:
+      - skill.beta
+  skill.beta:
+    path: beta
+    status: active
+    invocation: workflow-auto
+    exposure: exported
+    category: testing
+capabilities: {}
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - skill.alpha
+      - skill.beta
+    blocked_skills: []
+install_units: {}
+`;
+}
 
 test("cli guard exposes hook-friendly allow and deny decisions", async () => {
   const baseArgs = ["--config", "examples/multi-source.config.yaml", "--skills", "examples/multi-source-skills"];
@@ -2766,6 +3521,7 @@ test("cli variant add impact reports capability alternatives for the base skill"
 test("cli variant add help shows public command usage", async () => {
   const result = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "--help"]);
 
+  assert.match(result.stdout, /route <intent> --workflow <name>/);
   assert.match(result.stdout, /variant add <variant-id> --from <base-id> --capability <name> --workflow <name>/);
   assert.match(result.stdout, /\[--mode manual-only\|router-only\|workflow-auto\]/);
   assert.match(result.stdout, /\[--owner-install-unit <unit-id>\]/);

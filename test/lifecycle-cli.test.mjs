@@ -28,9 +28,10 @@ test("init next commands preserve GitHub npx package specs", async () => {
 
     assert.equal(code, 0);
     assert.match(stdout, /Next:/);
-    assert.match(stdout, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard doctor/);
-    assert.match(stdout, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard brief/);
+    assert.match(stdout, /npx --yes --package github:NyXXiR\/skillboard skillboard doctor/);
+    assert.match(stdout, /npx --yes --package github:NyXXiR\/skillboard skillboard brief/);
     assert.doesNotMatch(stdout, /npx agent-skillboard/);
+    assert.doesNotMatch(stdout, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

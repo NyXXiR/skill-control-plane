@@ -33,7 +33,8 @@ export function contractView(brief) {
     cleanup_value_keys: {
       conservative: Object.keys(brief.cleanup.conservative),
       full_reset: Object.keys(brief.cleanup.full_reset)
-    }
+    },
+    assistant_guidance: guidanceView(brief.assistant_guidance)
   };
 }
 
@@ -89,5 +90,20 @@ function reviewQueueView(entry) {
     action_ids: entry.action_ids,
     advanced_keys: Object.keys(entry.advanced),
     advanced: entry.advanced
+  };
+}
+
+function guidanceView(guidance) {
+  return {
+    keys: Object.keys(guidance),
+    status: guidance.status,
+    choices: guidance.choices,
+    guard: {
+      keys: Object.keys(guidance.guard),
+      required: guidance.guard.required,
+      when: guidance.guard.when,
+      has_command_hint: typeof guidance.guard.command_hint === "string",
+      allowed_use: guidance.guard.allowed_use
+    }
   };
 }

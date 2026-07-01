@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { loadWorkspace } from "../src/index.mjs";
+import { runInitCommand } from "../src/lifecycle-cli.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,26 @@ function assertInitNextCommand(stdout, command, dir, suffix = "") {
       && candidate.endsWith(suffix);
   });
   assert.ok(line, `expected init Next command ${command} for ${dir}${suffix}\n${stdout}`);
+}
+
+function assertInitNextWorkflowCommand(stdout, workflow, dir, suffix = "") {
+  const prefix = `- node bin/skillboard.mjs brief --workflow ${workflow} --dir `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes(dir)
+      && candidate.endsWith(suffix);
+  });
+  assert.ok(line, `expected init Next workflow brief for ${workflow} in ${dir}${suffix}\n${stdout}`);
+}
+
+function assertInitNextWorkflowIntentCommand(stdout, workflow, dir) {
+  const prefix = `- node bin/skillboard.mjs brief --workflow ${workflow} --intent `;
+  const line = stdout.split("\n").find((candidate) => {
+    return candidate.startsWith(prefix)
+      && candidate.includes("'write tests before implementation'")
+      && candidate.includes(dir);
+  });
+  assert.ok(line, `expected init Next workflow intent brief for ${workflow} in ${dir}\n${stdout}`);
 }
 
 async function makeInitializedProject() {
@@ -118,6 +139,32 @@ test("doctor --summary prints compact status", async () => {
   }
 });
 
+test("init next commands keep no-prompt npx spelling", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-init-npx-next-"));
+  try {
+    const output = [];
+    await runInitCommand(
+      new Map([
+        ["dir", root],
+        ["no-scan-installed", "true"]
+      ]),
+      { write: (chunk) => output.push(chunk) },
+      {
+        cwd: process.cwd(),
+        entrypointPath: "/tmp/_npx/agent-skillboard/node_modules/.bin/skillboard",
+        packageSpec: "agent-skillboard"
+      }
+    );
+
+    const stdout = output.join("");
+    assert.match(stdout, /npx --yes --package agent-skillboard skillboard doctor --dir .* --summary/);
+    assert.match(stdout, /npx --yes --package agent-skillboard skillboard brief --dir /);
+    assert.doesNotMatch(stdout, /npx agent-skillboard/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("init summarizes large installed skill scans instead of printing the whole inventory", async () => {
   const root = await mkdtemp(join(tmpdir(), "skillboard-init-compact-output-"));
   try {
@@ -147,9 +194,15 @@ test("init summarizes large installed skill scans instead of printing the whole 
     assert.match(init.stdout, /No automatic model invocation was enabled/);
     assert.match(init.stdout, /12 manual-only skills available/);
     assert.match(init.stdout, /Next:/);
+    assert.match(init.stdout, /Ask your AI: "What skills can you use in this project\?"/);
     assertInitNextCommand(init.stdout, "doctor", project, " --summary");
-    assertInitNextCommand(init.stdout, "brief", project);
-    assertInitNextCommand(init.stdout, "brief", project, " --verbose");
+    assert.match(init.stdout, /Choose a workflow: `hermes-codex-local-manual`/);
+    assert.match(init.stdout, /Example workflow brief: `hermes-codex-local-manual`/);
+    assertInitNextWorkflowCommand(init.stdout, "hermes-codex-local-manual", project);
+    assert.match(init.stdout, /Example task routing: "write tests before implementation"/);
+    assertInitNextWorkflowIntentCommand(init.stdout, "hermes-codex-local-manual", project);
+    assertInitNextWorkflowCommand(init.stdout, "hermes-codex-local-manual", project, " --verbose");
+    assert.doesNotMatch(init.stdout, /node bin\/skillboard\.mjs brief --dir .* --verbose/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

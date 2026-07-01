@@ -6,7 +6,8 @@ export const TOP_LEVEL_KEYS = [
   "skills",
   "sources",
   "review_queue",
-  "cleanup"
+  "cleanup",
+  "assistant_guidance"
 ];
 
 export const EXPECTED_INITIALIZED_CONTRACT = {
@@ -115,6 +116,25 @@ export const EXPECTED_INITIALIZED_CONTRACT = {
   cleanup_value_keys: {
     conservative: ["dryRun", "removed", "updated", "preserved"],
     full_reset: ["dryRun", "removed", "updated", "preserved"]
+  },
+  assistant_guidance: {
+    keys: ["status", "summary", "recommended_next_step", "choices", "guard"],
+    status: "ready",
+    choices: [],
+    guard: {
+      keys: ["required", "when", "command_hint", "allowed_use"],
+      required: true,
+      when: "before invoking a skill",
+      has_command_hint: true,
+      allowed_use: {
+        confirmation_required: false,
+        start: "State at the start which selected skill is being used for this request.",
+        finish: "State at completion which selected skill was used.",
+        start_message_template: "I will use <skill-id> for this request.",
+        finish_message_template: "I used <skill-id> for this request.",
+        ask_user_when: "Ask the user only if the guard denies use or a policy-changing action is needed."
+      }
+    }
   }
 };
 

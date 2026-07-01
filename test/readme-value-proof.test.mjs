@@ -193,9 +193,89 @@ test("README proof fixture simulates AI-mediated approved action flow", async ()
   }
 });
 
+test("README proof fixture shows route picks the right allowed skill", async () => {
+  const args = [
+    "--config",
+    "examples/multi-source.config.yaml",
+    "--skills",
+    "examples/multi-source-skills",
+    "--workflow",
+    "codex-night-workflow"
+  ];
+  const route = await runSkillboard([
+    "route",
+    "write tests before implementation",
+    ...args,
+    "--json"
+  ]);
+  const brief = await runSkillboard([
+    "brief",
+    "--intent",
+    "write tests before implementation",
+    ...args,
+    "--json"
+  ]);
+  const guard = await runSkillboard([
+    "guard",
+    "use",
+    "matt.tdd",
+    ...args,
+    "--json"
+  ]);
+  const noMatch = await runSkillboard([
+    "route",
+    "ship a powerpoint deck",
+    ...args,
+    "--json"
+  ]);
+
+  assert.equal(route.code, 0);
+  const routePayload = JSON.parse(route.stdout);
+  assert.equal(routePayload.intent, "write tests before implementation");
+  assert.equal(routePayload.workflow, "codex-night-workflow");
+  assert.equal(routePayload.match_source, "capability");
+  assert.equal(routePayload.matched_capability, "test-first-implementation");
+  assert.equal(routePayload.confidence, "high");
+  assert.equal(routePayload.recommended_skill, "matt.tdd");
+  assert.deepEqual(routePayload.fallback_skills, ["private.tdd-work-continuity"]);
+  assert.equal(routePayload.guard.allowed, true);
+  assert.match(routePayload.guard_command, /skillboard guard use matt\.tdd/);
+  assert.equal(routePayload.usage_disclosure.confirmation_required, false);
+  assert.equal(routePayload.usage_disclosure.start_message, "I will use matt.tdd for this request.");
+  assert.equal(routePayload.usage_disclosure.finish_message, "I used matt.tdd for this request.");
+  assert.deepEqual(routePayload.possible_skills.map((skill) => skill.id), [
+    "matt.tdd",
+    "private.tdd-work-continuity"
+  ]);
+
+  assert.equal(brief.code, 0);
+  const briefRoute = JSON.parse(brief.stdout).assistant_guidance.route;
+  assert.equal(briefRoute.recommended_skill, "matt.tdd");
+  assert.equal(briefRoute.guard_allowed, true);
+  assert.equal(briefRoute.usage_disclosure.start_message, "I will use matt.tdd for this request.");
+
+  assert.equal(guard.code, 0);
+  const guardPayload = JSON.parse(guard.stdout);
+  assert.equal(guardPayload.allowed, true);
+  assert.equal(guardPayload.skill, "matt.tdd");
+  assert.deepEqual(guardPayload.roles, ["active", "preferred"]);
+
+  assert.equal(noMatch.code, 0);
+  const noMatchPayload = JSON.parse(noMatch.stdout);
+  assert.equal(noMatchPayload.matched_capability, null);
+  assert.equal(noMatchPayload.recommended_skill, null);
+  assert.equal(noMatchPayload.usage_disclosure, null);
+  assert.match(noMatchPayload.recommendation_reason, /Ask a clarifying question/);
+  assert.deepEqual(noMatchPayload.possible_skills.map((skill) => skill.id), [
+    "matt.tdd",
+    "private.tdd-work-continuity"
+  ]);
+});
+
 test("README links to the reproducible value proof report", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
   const proof = await readFile(resolve("docs/value-proof.md"), "utf8");
+  const routing = await readFile(resolve("docs/routing.md"), "utf8");
 
   assert.match(readme, /## Tested Value Proof/);
   assert.match(readme, /\[full reproducible proof\]\(docs\/value-proof\.md\)/);
@@ -205,12 +285,14 @@ test("README links to the reproducible value proof report", async () => {
   assert.match(readme, /Same fixture, different answer/);
   assert.match(readme, /A raw list says `matt\.tdd` is active/);
   assert.match(readme, /SkillBoard says the same workflow has 0\s+usable skills/);
+  assert.match(readme, /routes "write tests before\s+implementation" to `matt\.tdd`/);
   assert.match(readme, /Question/);
   assert.match(readme, /Raw list/);
   assert.match(readme, /SkillBoard brief/);
   assert.match(readme, /0 usable skills/);
   assert.match(readme, /8 blocked skills/);
   assert.match(readme, /Policy errors: 2/);
+  assert.match(readme, /\[Capability routing\]\(docs\/routing\.md\)/);
   assert.match(readme, /\[Command and config reference\]\(docs\/reference\.md\)/);
 
   assert.match(proof, /node --test test\/readme-value-proof\.test\.mjs/);
@@ -232,6 +314,18 @@ test("README links to the reproducible value proof report", async () => {
   assert.match(proof, /assistant_guidance/);
   assert.match(proof, /guard use anthropic\.docx/);
   assert.match(proof, /guard use matt\.grill-me/);
+  assert.match(proof, /Case 4: AI route picks the right allowed skill/);
+  assert.match(proof, /route "write tests before implementation"/);
+  assert.match(proof, /Recommended skill: `matt\.tdd`/);
+  assert.match(proof, /Fallback skill: `private\.tdd-work-continuity`/);
+  assert.match(proof, /I will use matt\.tdd for this request\./);
+  assert.match(proof, /Ask a clarifying question before choosing a skill/);
+
+  assert.match(routing, /# Capability Routing/);
+  assert.match(routing, /prefer `brief --intent`/);
+  assert.match(routing, /matched_capability/);
+  assert.match(routing, /I will use <skill-id> for this request\./);
+  assert.match(routing, /Ask a clarifying question before choosing a skill/);
 });
 
 test("README leads with ask-your-AI workflow before command details", async () => {
@@ -242,18 +336,24 @@ test("README leads with ask-your-AI workflow before command details", async () =
     readme.indexOf("## What SkillBoard Gives You")
   );
 
-  assert.match(firstScreen, /Ask your AI/i);
+  assert.match(firstScreen, /Let your AI use allowed skills without interruption/i);
   assert.match(firstScreen, /What skills can you use in this project\?/);
   assert.match(firstScreen, /Can you make `anthropic\.docx` available for this workflow\?/);
   assert.match(firstScreen, /behind the scenes/i);
-  assert.match(firstScreen, /You\s+do not need to memorize/i);
+  assert.match(firstScreen, /audit trace,\s+not a permission prompt/i);
+  assert.match(firstScreen, /I will use matt\.tdd for this request\./);
+  assert.match(firstScreen, /I used matt\.tdd for this request\./);
+  assert.match(firstScreen, /policy-changing action/i);
+  assert.match(firstScreen, /You\s+do\s+not need to\s+memorize/i);
 
   assert.match(quickStart, /Ask your AI/i);
   assert.match(quickStart, /AI runs\s+SkillBoard behind the scenes/i);
   assert.match(quickStart, /AI\/automation\/operator details/i);
-  assert.match(quickStart, /npx agent-skillboard init/);
-  assert.match(quickStart, /npx agent-skillboard brief/);
-  assert.match(quickStart, /npx agent-skillboard doctor --summary/);
+  assert.match(quickStart, /npx --yes --package agent-skillboard skillboard init/);
+  assert.match(quickStart, /npx --yes --package agent-skillboard skillboard doctor --summary/);
+  assert.match(quickStart, /npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>/);
+  assert.match(quickStart, /copyable workflow-scoped `brief` command/);
+  assert.doesNotMatch(quickStart, /npx agent-skillboard init/);
   assert.doesNotMatch(quickStart, /run these commands every time you need a skill/i);
 });
 

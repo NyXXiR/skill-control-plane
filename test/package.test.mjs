@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -11,14 +11,14 @@ const execFileAsync = promisify(execFile);
 test("package manifest excludes internal work artifacts from npm pack", async () => {
   const manifest = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 
-  assert.deepEqual(manifest.files, ["bin", "src", "docs", "examples", "profiles", "README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE", "tsconfig.lsp.json"]);
+  assert.deepEqual(manifest.files, ["bin", "src", "docs/*.md", "docs/plans", "examples", "profiles", "README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE", "tsconfig.lsp.json"]);
 });
 
 test("package manifest is publishable as the SkillBoard CLI", async () => {
   const manifest = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 
   assert.equal(manifest.name, "agent-skillboard");
-  assert.equal(manifest.description, "Know, gate, and audit which AI agent skills can run in each workflow.");
+  assert.equal(manifest.description, "Let AI agents pick and use allowed skills in each workflow.");
   assert.equal(manifest.private, undefined);
   assert.deepEqual(manifest.bin, {
     skillboard: "bin/skillboard.mjs",
@@ -33,7 +33,7 @@ test("package manifest is publishable as the SkillBoard CLI", async () => {
     url: "https://github.com/NyXXiR/skillboard/issues"
   });
   assert.equal(manifest.homepage, "https://github.com/NyXXiR/skillboard#readme");
-  for (const keyword of ["ai-agent", "skills", "codex", "claude-code", "policy"]) {
+  for (const keyword of ["ai-agent", "agent-skills", "skills", "skill-routing", "workflow", "codex", "claude-code", "policy"]) {
     assert.ok(manifest.keywords.includes(keyword));
   }
 });
@@ -111,6 +111,7 @@ test("npm pack dry-run includes public runtime files and excludes work artifacts
   assert.ok(paths.includes("docs/reference.md"));
   assert.ok(paths.includes("docs/rollout-runbook.md"));
   assert.equal(paths.includes("skillboard.png"), false);
+  assert.equal(paths.some((path) => path.startsWith("docs/plan/")), false);
   assert.equal(paths.some((path) => path.startsWith(".omo/")), false);
   assert.equal(paths.some((path) => path.startsWith("test/")), false);
   assert.equal(paths.includes("package-lock.json"), false);
@@ -128,6 +129,69 @@ test("packed package runs through npm exec one-command bootstrap surface", async
     assert.match(help.stdout, /^SkillBoard - AI-mediated workflow-scoped skill policy$/m);
     assert.match(help.stdout, /init \[--dir <path>\]/);
     assert.match(npxAlias.stdout, /^SkillBoard - AI-mediated workflow-scoped skill policy$/m);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("packed package drives fresh project through intent brief and guard", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "skillboard-npm-intent-test-"));
+  try {
+    const project = join(temp, "project");
+    const skillsRoot = join(project, "skills");
+    const skillPath = join(skillsRoot, "user-test-first");
+    const configPath = join(project, "skillboard.config.yaml");
+    const packResult = await execNpm(["pack", "--json", "--pack-destination", temp]);
+    const [pack] = JSON.parse(packResult.stdout);
+    const tarballPath = join(temp, pack.filename);
+    const skillboard = (args) => execNpm(["exec", "--yes", "--package", tarballPath, "--", "skillboard", ...args], { cwd: temp });
+
+    await skillboard(["init", "--dir", project, "--no-scan-installed"]);
+    const agentsBridge = await readFile(join(project, "AGENTS.md"), "utf8");
+    await mkdir(skillPath, { recursive: true });
+    await writeFile(
+      join(skillPath, "SKILL.md"),
+      "---\nname: test-first\ndescription: Write tests before implementation.\n---\n# test-first\n",
+      "utf8"
+    );
+    const baseArgs = ["--config", configPath, "--skills", skillsRoot];
+    await skillboard(["add", "skill", "user.test-first", "--path", "user-test-first", "--category", "testing", ...baseArgs]);
+    await skillboard(["add", "workflow", "daily-workflow", "--harness", "codex", "--skill", "user.test-first", ...baseArgs]);
+
+    const brief = await skillboard([
+      "brief",
+      "--intent",
+      "write tests before implementation",
+      "--workflow",
+      "daily-workflow",
+      ...baseArgs,
+      "--json"
+    ]);
+    const payload = JSON.parse(brief.stdout);
+    const guard = await skillboard(["guard", "use", "user.test-first", "--workflow", "daily-workflow", ...baseArgs, "--json"]);
+
+    assert.match(agentsBridge, /brief --intent <request>/i);
+    assert.match(agentsBridge, /assistant_guidance\.route/);
+    assert.match(agentsBridge, /route_candidates/);
+    assert.match(agentsBridge, /I will use <skill-id> for this request\./);
+    assert.match(agentsBridge, /I used <skill-id> for this request\./);
+    assert.match(agentsBridge, /ask a clarifying question/i);
+    assert.equal(payload.assistant_guidance.status, "ready");
+    assert.equal(payload.assistant_guidance.route.workflow, "daily-workflow");
+    assert.equal(payload.assistant_guidance.route.matched_capability, null);
+    assert.equal(payload.assistant_guidance.route.matched_skill, "user.test-first");
+    assert.equal(payload.assistant_guidance.route.recommended_skill, "user.test-first");
+    assert.equal(payload.assistant_guidance.route.route_candidates[0].skill, "user.test-first");
+    assert.equal(payload.assistant_guidance.route.route_candidates[0].selected, true);
+    assert.equal(payload.assistant_guidance.route.route_candidates[0].guard_allowed, true);
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.confirmation_required, false);
+    assert.match(payload.assistant_guidance.route.usage_disclosure.start, /State at the start that user\.test-first is being used/);
+    assert.match(payload.assistant_guidance.route.usage_disclosure.finish, /State at completion that user\.test-first was used/);
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.start_message, "I will use user.test-first for this request.");
+    assert.equal(payload.assistant_guidance.route.usage_disclosure.finish_message, "I used user.test-first for this request.");
+    assert.equal(payload.assistant_guidance.route.guard_allowed, true);
+    assert.match(payload.assistant_guidance.route.guard_command, /skillboard guard use user\.test-first/);
+    assert.equal(JSON.parse(guard.stdout).allowed, true);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

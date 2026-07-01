@@ -1,3 +1,8 @@
+import {
+  activeConflictEntriesForSkill,
+  conflictingSkillIds
+} from "./conflicts.mjs";
+
 export function impactDisable(workspace, skillId) {
   const affectedWorkflowEntries = workspace.workflows
     .filter((workflow) => workflow.activeSkills.includes(skillId) || workflow.requiredCapabilities.some((capability) => {
@@ -7,12 +12,16 @@ export function impactDisable(workspace, skillId) {
   const affectedOutputs = [...new Set(affectedWorkflowEntries.flatMap((workflow) => workflow.requiredOutputs))];
   const skill = workspace.skills.find((candidate) => candidate.id === skillId);
   const alternatives = alternativesForSkill(workspace, skillId, skill);
+  const conflictingSkills = conflictingSkillIds(workspace, skillId);
+  const activeConflicts = activeConflictEntriesForSkill(workspace, skillId);
   return {
     skillId,
     exists: skill !== undefined,
     affectedWorkflows,
     affectedOutputs,
     alternatives,
+    conflictingSkills,
+    activeConflicts,
     risk: riskFor(skill, affectedWorkflows, alternatives)
   };
 }

@@ -3,6 +3,7 @@ import {
   NON_CALLABLE_WORKFLOW_INVOCATIONS,
   NON_CALLABLE_WORKFLOW_STATUSES
 } from "../constants.mjs";
+import { workflowConflictEntries } from "../../conflicts.mjs";
 
 export const workflowRules = [
   {
@@ -86,6 +87,18 @@ export const workflowRules = [
           if (preferred !== undefined) {
             diagnostics.push(...nonCallableDiagnostics(`Capability requirement ${capability.name} in workflow ${workflow.name} prefers`, preferred));
           }
+        }
+      }
+      return diagnostics;
+    }
+  },
+  {
+    id: "WF-CONFLICT-001",
+    check(ctx) {
+      const diagnostics = [];
+      for (const workflow of ctx.workflows) {
+        for (const conflict of workflowConflictEntries(ctx.workspace, workflow)) {
+          diagnostics.push(`Workflow ${workflow.name} has active skill conflict: ${conflict.skill} conflicts_with ${conflict.conflictingSkill}.`);
         }
       }
       return diagnostics;

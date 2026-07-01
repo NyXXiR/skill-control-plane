@@ -287,11 +287,17 @@ test("assistant guidance only exposes currently applicable action choices", () =
       },
       {
         id: "applicable:four",
+        kind: "activate-skill",
         label: "Applicable action",
         reason: "Can apply.",
         risk: "medium",
         requires_user_confirmation: true,
         blocked_reason: null,
+        applies_to: {
+          kind: "skill",
+          id: "target.skill",
+          workflow: "agent"
+        },
         application: {
           apply: { argv: ["skillboard", "apply-action", "applicable:four"], display: "skillboard apply-action applicable:four" },
           blocked_reason: null
@@ -302,6 +308,12 @@ test("assistant guidance only exposes currently applicable action choices", () =
 
   assert.deepEqual(guidance.choices.map((choice) => choice.action_id), ["applicable:four"]);
   assert.equal(guidance.choices[0].blocked_reason, null);
+  assert.equal(guidance.choices[0].kind, "activate-skill");
+  assert.deepEqual(guidance.choices[0].applies_to, {
+    kind: "skill",
+    id: "target.skill",
+    workflow: "agent"
+  });
 });
 
 test("assistant guidance shell-quotes guard command hint metacharacters", () => {

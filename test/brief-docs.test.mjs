@@ -98,12 +98,15 @@ test("brief docs mention AI-mediated flow and lifecycle safety terms", async () 
   assert.doesNotMatch(text, /auto-trust|auto trust|deletes.*SKILL\.md|delete.*SKILL\.md/i);
 });
 
-test("brief docs help teaches the approval loop", async () => {
+test("brief docs help teaches the disclosure-first control loop", async () => {
   const result = await execFileAsync(process.execPath, ["bin/skillboard.mjs", "help"]);
 
   assert.match(result.stdout, /brief \[--workflow <name>\]/);
   assert.match(result.stdout, /apply-action <action-id>/);
-  assert.match(result.stdout, /AI\/automation approval loop:/);
+  assert.match(result.stdout, /AI\/automation control loop:/);
+  assert.doesNotMatch(result.stdout, /AI\/automation approval loop:/);
+  assert.match(result.stdout, /For an already-allowed skill, disclose the selected skill at start and completion/i);
+  assert.match(result.stdout, /do not ask for another approval/i);
   assert.match(result.stdout, /Translate a user's skill request into the current brief/i);
   assert.match(result.stdout, /current action id/i);
   assert.match(result.stdout, /one confirmation/i);
@@ -223,10 +226,20 @@ function assertGeneratedBridgeIntentDriven(text) {
   assert.match(text, /BEGIN SKILLBOARD/);
   assert.match(text, /answer skill availability questions from SkillBoard/i);
   assert.match(text, /translate user intent into current action ids/i);
+  assert.match(text, /brief --intent <request>/i);
+  assert.match(text, /assistant_guidance\.route/);
+  assert.match(text, /recommended_skill/);
+  assert.match(text, /fallback_skills/);
+  assert.match(text, /route_candidates/);
+  assert.match(text, /guard_command/);
+  assert.match(text, /I will use <skill-id> for this request\./);
+  assert.match(text, /I used <skill-id> for this request\./);
+  assert.match(text, /ask a clarifying question/i);
   assert.match(text, /ask for one confirmation/i);
   assert.match(text, /apply one current action/i);
   assert.match(text, /reread the post-apply brief/i);
-  assert.match(text, /guard before invocation/i);
+  assert.match(text, /run the guard automatically before invocation/i);
+  assert.match(text, /audit trace,\s+not a permission prompt/i);
   assert.match(text, /current brief/i);
   assert.match(text, /do not apply cached or stale action ids/i);
   assert.match(text, /do not infer availability from `SKILL\.md` bodies/i);

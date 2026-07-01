@@ -11,15 +11,6 @@ import { buildSkillBrief } from "../src/index.mjs";
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test("direct source cli help renders AI-mediated help", async () => {
-  const result = await runNode(["src/cli.mjs", "--help"]);
-
-  assert.equal(result.code, 0, commandFailure(result));
-  assert.match(result.stdout, /^SkillBoard - AI-mediated workflow-scoped skill policy/m);
-  assert.match(result.stdout, /AI\/automation approval loop/);
-  assert.match(result.stdout, /apply-action re-resolves current actions/);
-});
-
 test("importing source cli does not execute the command router", async () => {
   const result = await runNode([
     "--input-type=module",

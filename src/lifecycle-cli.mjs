@@ -30,7 +30,8 @@ export async function runInitCommand(options, stdout, runtime = defaultRuntime()
   writeSafetyDefault(stdout, result.safety);
   writeNextCommands(stdout, {
     command: commandPrefix(runtime),
-    dir: options.get("dir")
+    dir: options.get("dir"),
+    workflows: result.scan.addedWorkflows ?? []
   });
   return 0;
 }
@@ -94,10 +95,22 @@ function writeSafetyDefault(stdout, safety) {
 
 function writeNextCommands(stdout, next) {
   const dir = next.dir === undefined ? "" : ` --dir ${shellQuote(next.dir)}`;
+  const workflows = sorted(next.workflows ?? []);
   stdout.write("Next:\n");
+  stdout.write('- Ask your AI: "What skills can you use in this project?"\n');
   stdout.write(`- ${next.command} doctor${dir} --summary\n`);
-  stdout.write(`- ${next.command} brief${dir}\n`);
-  stdout.write(`- ${next.command} brief${dir} --verbose\n`);
+  if (workflows.length === 0) {
+    stdout.write(`- ${next.command} brief${dir}\n`);
+    stdout.write(`- ${next.command} brief${dir} --verbose\n`);
+    return;
+  }
+  const workflow = workflows[0];
+  stdout.write(`Choose a workflow: ${formatList(workflows)}\n`);
+  stdout.write(`Example workflow brief: ${formatList([workflow])}\n`);
+  stdout.write(`- ${next.command} brief --workflow ${shellQuote(workflow)}${dir}\n`);
+  stdout.write('Example task routing: "write tests before implementation"\n');
+  stdout.write(`- ${next.command} brief --workflow ${shellQuote(workflow)} --intent ${shellQuote("write tests before implementation")}${dir}\n`);
+  stdout.write(`- ${next.command} brief --workflow ${shellQuote(workflow)}${dir} --verbose\n`);
 }
 
 function formatList(values) {
@@ -127,10 +140,8 @@ function commandPrefix(runtime) {
   const entrypoint = runtime.entrypointPath ?? "";
   const normalized = entrypoint.replaceAll("\\", "/");
   if (normalized.includes("/_npx/")) {
-    if (runtime.packageSpec !== undefined && runtime.packageSpec !== "agent-skillboard") {
-      return `npm exec --yes --package ${shellQuote(runtime.packageSpec)} -- skillboard`;
-    }
-    return "npx agent-skillboard";
+    const packageSpec = runtime.packageSpec ?? "agent-skillboard";
+    return `npx --yes --package ${shellQuote(packageSpec)} skillboard`;
   }
   if (isSourceTreeEntrypoint(entrypoint)) {
     return `node ${sourceTreeEntrypoint(entrypoint, runtime.cwd ?? process.cwd())}`;

@@ -100,8 +100,10 @@ previous brief stale, so the agent should use one current action id from the
 current brief and then rerun `skillboard brief --json` before answering another
 availability question or applying another action card. The runtime boundary
 remains `skillboard guard use ...`, run immediately before the actual skill
-invocation. CLI examples in this model are AI/automation/operator details, not
-a memorized user workflow.
+invocation. A passing guard is not another user confirmation step: the agent
+should disclose the selected skill before use and mention it again in the
+result. That disclosure is an audit trace, not a permission prompt. CLI examples
+in this model are AI/automation/operator details, not a memorized user workflow.
 
 ## Workflow Activation
 
@@ -120,6 +122,30 @@ workflows:
 
 The generated lockfile pins install-unit source/cache digests, skill content
 digests, workflow bindings, and policy decisions.
+
+## Skill Conflicts
+
+Skills can declare known overlap or incompatibility with `conflicts_with`:
+
+```yaml
+skills:
+  meerkat.requirement-intake:
+    path: requirement-intake
+    status: active
+    invocation: router-only
+    exposure: exported
+    category: requirements
+    conflicts_with:
+      - matt.grill-me
+```
+
+The referenced skill must be declared. If both sides of a declared conflict are
+active or capability-selectable in the same workflow, and neither is explicitly
+blocked there, policy fails. `skillboard guard use ...` denies the selected
+skill with a conflict reason, `brief` moves the affected skill into "Blocked for
+safety", and `impact disable <skill-id> --json` reports `conflictingSkills` plus
+`activeConflicts`. This gives the AI a concrete reason to ask for a policy
+change instead of silently choosing between overlapping skills.
 
 ## Capabilities
 

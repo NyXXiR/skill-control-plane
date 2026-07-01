@@ -49,6 +49,21 @@ test("docs/capabilities.md exists and explains global vs workflow-scoped capabil
   assert.match(text, /required_capabilities/);
 });
 
+test("docs explain runtime skill conflicts across guard brief and impact", async () => {
+  const readme = await readFile(resolve("README.md"), "utf8");
+  const policy = await readFile(resolve("docs/policy-model.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
+  const combined = `${readme}\n${policy}\n${reference}`;
+
+  assert.match(combined, /conflicts_with/);
+  assert.match(combined, /guard use/);
+  assert.match(combined, /Blocked for safety/);
+  assert.match(combined, /impact disable <skill-id> --json/);
+  assert.match(combined, /conflictingSkills/);
+  assert.match(combined, /activeConflicts/);
+  assert.match(readme, /Workflow conflict checks/);
+});
+
 test("docs document manual variant lifecycle without promising conversion", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
   const capabilities = await readFile(resolve("docs/capabilities.md"), "utf8");
@@ -121,26 +136,36 @@ test("README and install docs lead with npm quick start after registry publish",
   const reference = await readFile(resolve("docs/reference.md"), "utf8");
 
   assert.match(readme, /## 5-Minute Quick Start/);
-  assert.match(readme, /npx agent-skillboard init/);
-  assert.match(readme, /npx agent-skillboard brief/);
-  assert.match(readme, /npx agent-skillboard doctor --summary/);
+  assert.match(readme, /npx --yes --package agent-skillboard skillboard init/);
+  assert.match(readme, /npx --yes --package agent-skillboard skillboard doctor --summary/);
+  assert.match(readme, /npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>/);
+  assert.match(readme, /copyable workflow-scoped `brief` command/);
+  assert.match(readme, /If `init` does not print a workflow,\s+run the unscoped `brief` command it prints instead/);
   assert.match(readme, /\[docs\/install\.md\]\(docs\/install\.md\)/);
   assert.match(readme, /\[docs\/reference\.md\]\(docs\/reference\.md\)/);
+  assert.doesNotMatch(readme, /npx agent-skillboard init/);
   assert.doesNotMatch(readme, /Unreleased GitHub builds/);
   assert.doesNotMatch(readme, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
 
   assert.match(install, /## Install From npm/);
-  assert.match(install, /npx agent-skillboard init/);
-  assert.match(install, /npx agent-skillboard brief/);
-  assert.match(install, /npx agent-skillboard doctor --summary/);
   assert.match(install, /npx --yes --package agent-skillboard skillboard init/);
+  assert.match(install, /npx --yes --package agent-skillboard skillboard doctor --summary/);
+  assert.match(install, /npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>/);
   assert.match(install, /npm exec --yes --package agent-skillboard -- skillboard init/);
+  assert.match(install, /npm exec --yes --package agent-skillboard -- skillboard doctor --summary/);
+  assert.match(install, /npm exec --yes --package agent-skillboard -- skillboard brief --workflow <workflow-from-init>/);
+  assert.match(install, /If `init` does not print a\s+workflow, run the unscoped `brief` command it prints instead/);
+  assert.doesNotMatch(install, /npx agent-skillboard init/);
   assert.match(install, /## Run Unreleased Builds From GitHub/);
   assert.match(install, /npx --yes --package github:NyXXiR\/skillboard skillboard init/);
+  assert.match(install, /npx --yes --package github:NyXXiR\/skillboard skillboard brief --workflow <workflow-from-init>/);
   assert.match(install, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard init/);
+  assert.match(install, /npm exec --yes --package github:NyXXiR\/skillboard -- skillboard brief --workflow <workflow-from-init>/);
   assert.match(install, /## Install From A Clone/);
   assert.match(reference, /git clone https:\/\/github\.com\/NyXXiR\/skillboard\.git/);
   assert.match(reference, /node bin\/skillboard\.mjs init --dir \/path\/to\/your\/project/);
+  assert.match(reference, /node bin\/skillboard\.mjs brief --dir \/path\/to\/your\/project --workflow <workflow-from-init>/);
+  assert.match(reference, /If `init` does not print a workflow, run the unscoped `brief` command it prints\s+instead/);
   assert.doesNotMatch(install, /not published yet/i);
 });
 
@@ -152,18 +177,49 @@ test("user docs frame commands as AI automation details, not a memorized user lo
   const combined = `${readme}\n${userFlow}\n${install}\n${policy}`;
 
   assert.match(combined, /Ask your AI/i);
-  assert.match(combined, /You\s+do not need to memorize the SkillBoard command loop/i);
+  assert.match(combined, /You\s+do\s+not need to\s+memorize the SkillBoard command loop/i);
   assert.match(combined, /behind the scenes/i);
   assert.match(combined, /AI\/automation\/operator details/i);
   assert.match(userFlow, /When you ask your AI/i);
   assert.match(install, /After install, ask your AI/i);
   assert.match(policy, /The user does\s+not need to know the command loop/i);
+  assert.match(combined, /already-allowed skills/i);
+  assert.match(combined, /not ask for another\s+approval/i);
+  assert.match(combined, /disclose the selected skill/i);
+  assert.match(combined, /audit trace,\s+not a permission prompt/i);
 
   assert.match(combined, /read the current brief/i);
   assert.match(combined, /current action id/i);
   assert.doesNotMatch(combined, /apply cached action-card commands/i);
   assert.doesNotMatch(combined, /infer availability from raw SKILL\.md/i);
   assert.doesNotMatch(combined, /run these commands every time you need a skill/i);
+});
+
+test("public docs explain read-only routing for choosing a skill", async () => {
+  const readme = await readFile(resolve("README.md"), "utf8");
+  const reference = await readFile(resolve("docs/reference.md"), "utf8");
+  const userFlow = await readFile(resolve("docs/user-flow.md"), "utf8");
+  const combined = `${readme}\n${reference}\n${userFlow}`;
+
+  assert.match(readme, /Which skill should you use to write tests first/);
+  assert.match(readme, /`brief`, `route`, `can-use`, and `guard use`/);
+  assert.match(reference, /skillboard brief \[--workflow <name>\] \[--intent <request>\]/);
+  assert.match(reference, /assistant_guidance/);
+  assert.match(reference, /brief --intent/);
+  assert.match(reference, /skillboard route <intent> --workflow <name>/);
+  assert.match(reference, /## Capability Routing/);
+  assert.match(reference, /matched_capability: null/);
+  assert.match(reference, /workflow-bound skill id, path, category, `SKILL\.md` name, and `SKILL\.md`\s+description metadata/);
+  assert.match(combined, /match_source/);
+  assert.match(combined, /matched_terms/);
+  assert.match(combined, /recommendation_reason/);
+  assert.match(reference, /disclose the skill at start and completion/i);
+  assert.match(userFlow, /skillboard brief --intent "write tests before implementation"/);
+  assert.match(userFlow, /assistant_guidance\.route/);
+  assert.match(userFlow, /skillboard guard use/);
+  assert.match(combined, /read-only recommendation surface/i);
+  assert.match(combined, /does not inspect or\s+semantically rank `SKILL\.md` bodies/i);
+  assert.match(combined, /limited to the\s+selected workflow's active,\s+required, or global-auto bindings/i);
 });
 
 test("README and install docs include a Hermes system prompt bridge guide", async () => {
@@ -173,9 +229,19 @@ test("README and install docs include a Hermes system prompt bridge guide", asyn
 
   assert.match(combined, /Hermes System Prompt Bridge/);
   assert.match(combined, /Hermes does not automatically read `AGENTS\.md` or `CLAUDE\.md`/);
-  assert.match(combined, /skillboard brief --json --dir \/path\/to\/your\/project/);
+  assert.match(combined, /skillboard brief --workflow <workflow-name> --json --include-actions --dir \/path\/to\/your\/project/);
+  assert.match(combined, /skillboard brief --workflow <workflow-name> --intent <request> --json --dir \/path\/to\/your\/project/);
+  assert.match(combined, /assistant_guidance\.route/);
+  assert.match(combined, /recommended_skill/);
+  assert.match(combined, /fallback_skills/);
+  assert.match(combined, /route_candidates/);
+  assert.match(combined, /guard_command/);
+  assert.match(combined, /ask a clarifying question before choosing a\s+skill/i);
   assert.match(combined, /skillboard guard use <skill-id> --workflow <workflow-name> --dir \/path\/to\/your\/project/);
-  assert.match(combined, /skillboard apply-action <action-id> --dir \/path\/to\/your\/project --yes --json/);
+  assert.match(combined, /skillboard apply-action <action-id> --workflow <workflow-name> --dir \/path\/to\/your\/project --yes --json/);
+  assert.match(combined, /do not ask the user for another\s+approval/i);
+  assert.match(combined, /I will use <skill-id> for this request\./);
+  assert.match(combined, /I used <skill-id> for this request\./);
 });
 
 test("project dogfoods AGENTS.md and CLAUDE.md bridge files", async () => {
@@ -186,6 +252,20 @@ test("project dogfoods AGENTS.md and CLAUDE.md bridge files", async () => {
   assert.match(agents, /<!-- END SKILLBOARD -->/);
   assert.match(claude, /<!-- BEGIN SKILLBOARD -->/);
   assert.match(claude, /<!-- END SKILLBOARD -->/);
+  assert.match(agents, /do not ask for another approval/i);
+  assert.match(agents, /brief --intent <request>/i);
+  assert.match(agents, /assistant_guidance\.route/);
+  assert.match(agents, /route_candidates/);
+  assert.match(agents, /I will use <skill-id> for this request\./);
+  assert.match(agents, /I used <skill-id> for this request\./);
+  assert.match(agents, /ask a clarifying question/i);
+  assert.match(claude, /do not ask for another approval/i);
+  assert.match(claude, /brief --intent <request>/i);
+  assert.match(claude, /assistant_guidance\.route/);
+  assert.match(claude, /route_candidates/);
+  assert.match(claude, /I will use <skill-id> for this request\./);
+  assert.match(claude, /I used <skill-id> for this request\./);
+  assert.match(claude, /ask a clarifying question/i);
 });
 
 test("project dogfoods skillboard.config.yaml", async () => {

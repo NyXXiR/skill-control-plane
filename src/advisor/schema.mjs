@@ -29,8 +29,8 @@ export function buildBrief(data) {
   brief.cleanup = data.cleanup;
   if (data.actions !== undefined) {
     brief.actions = data.actions;
-    brief.assistant_guidance = buildAssistantGuidance(brief);
   }
+  brief.assistant_guidance = buildAssistantGuidance(brief, { route: data.route });
   return brief;
 }
 

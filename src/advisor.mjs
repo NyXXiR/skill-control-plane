@@ -3,6 +3,7 @@ import {
   listWorkflows
 } from "./control.mjs";
 import { doctorProject } from "./doctor.mjs";
+import { routeSkill } from "./route.mjs";
 import { buildActionCards, buildInitActions } from "./advisor/actions.mjs";
 import {
   buildBrief,
@@ -97,6 +98,7 @@ export async function buildSkillBrief(options = {}) {
 
   const skills = skillsForWorkflow(workspace, workflow.selected, sourceAudit);
   const actionData = actionsForBrief({ options, paths, workflow, skills, reviewQueue, cleanup, workspace });
+  const route = routeForBrief({ options, paths, workflow, workspace });
   const availabilityOk = doctor.config.valid && doctor.policy.ok && doctor.sources.ok;
   return buildBrief({
     ok: availabilityOk,
@@ -106,7 +108,21 @@ export async function buildSkillBrief(options = {}) {
     sources: summarizeSources(sourceAudit),
     reviewQueue: actionData.reviewQueue,
     cleanup,
-    actions: actionData.actions
+    actions: actionData.actions,
+    route
+  });
+}
+
+function routeForBrief({ options, paths, workflow, workspace }) {
+  const intent = options.intent?.trim();
+  if (intent === undefined || intent.length === 0 || workflow.selected === null || workflow.unknown || workflow.needs_selection) {
+    return undefined;
+  }
+  return routeSkill(workspace, {
+    intent,
+    workflow: workflow.selected,
+    configPath: paths.configPath,
+    skillsRoot: paths.skillsRoot
   });
 }
 

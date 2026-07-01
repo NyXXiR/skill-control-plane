@@ -1,21 +1,35 @@
 import { command } from "./action-core.mjs";
 
 const GUARD_WHEN = "before invoking a skill";
+const GUARD_ALLOWED_USE = Object.freeze({
+  confirmation_required: false,
+  start: "State at the start which selected skill is being used for this request.",
+  finish: "State at completion which selected skill was used.",
+  start_message_template: "I will use <skill-id> for this request.",
+  finish_message_template: "I used <skill-id> for this request.",
+  ask_user_when: "Ask the user only if the guard denies use or a policy-changing action is needed."
+});
 
-export function buildAssistantGuidance(brief) {
+export function buildAssistantGuidance(brief, options = {}) {
   const status = guidanceStatus(brief);
   const choices = status === "invalid-config" || hasPolicyErrors(brief) ? [] : choicesFromActions(brief.actions ?? []);
-  return {
+  const route = options.route === undefined ? null : routeGuidance(options.route);
+  const guidance = {
     status,
     summary: summaryForStatus(status, brief),
-    recommended_next_step: recommendedNextStep(status, brief, choices),
+    recommended_next_step: recommendedNextStep(status, brief, choices, route),
     choices,
     guard: {
       required: true,
       when: GUARD_WHEN,
-      command_hint: guardCommandHint(brief)
+      command_hint: guardCommandHint(brief),
+      allowed_use: GUARD_ALLOWED_USE
     }
   };
+  if (route !== null) {
+    guidance.route = route;
+  }
+  return guidance;
 }
 
 function guidanceStatus(brief) {
@@ -50,14 +64,13 @@ function hasInvalidConfig(brief) {
 
 function summaryForStatus(status, brief) {
   const readyCount = (brief.skills?.automatic_allowed?.length ?? 0) + (brief.skills?.manual_allowed?.length ?? 0);
-  const reviewCount = brief.review_queue?.length ?? 0;
-  const decisionCount = reviewCount === 0 ? (brief.actions?.length ?? 0) : reviewCount;
+  const decisionCount = guidanceDecisionCount(brief);
   const blockedCount = brief.skills?.blocked?.length ?? 0;
   switch (status) {
     case "ready":
       return `SkillBoard is ready; ${readyCount} skills are available in this workflow.`;
     case "needs-decision":
-      return `SkillBoard needs ${decisionCount} user decisions before this workflow is fully ready.`;
+      return `SkillBoard needs ${decisionCount} user ${decisionWord(decisionCount)} before this workflow is fully ready.`;
     case "blocked":
       return `SkillBoard found blocking policy issues; ${blockedCount} skills are blocked for safety.`;
     case "not-initialized":
@@ -73,10 +86,28 @@ function summaryForStatus(status, brief) {
   }
 }
 
-function recommendedNextStep(status, brief, choices) {
+function guidanceDecisionCount(brief) {
+  const skillDecisionCount = brief.skills?.needs_review?.length ?? 0;
+  if (skillDecisionCount > 0) {
+    return skillDecisionCount;
+  }
+  const reviewCount = brief.review_queue?.length ?? 0;
+  return reviewCount === 0 ? (brief.actions?.length ?? 0) : reviewCount;
+}
+
+function decisionWord(count) {
+  return count === 1 ? "decision" : "decisions";
+}
+
+function recommendedNextStep(status, brief, choices, route = null) {
   const firstChoice = choices[0];
   switch (status) {
     case "ready":
+      if (route !== null) {
+        return route.recommended_skill === null
+          ? "Ask a clarifying question; no workflow capability matched this request."
+          : `Use ${route.recommended_skill} for this request after the guard check passes.`;
+      }
       return "Run the guard check before invoking any selected skill.";
     case "needs-decision":
       return firstChoice === undefined
@@ -106,6 +137,37 @@ function recommendedNextStep(status, brief, choices) {
   }
 }
 
+function routeGuidance(route) {
+  return {
+    intent: route.intent,
+    workflow: route.workflow,
+    matched_capability: route.matched_capability,
+    matched_skill: route.matched_skill ?? null,
+    match_source: route.match_source,
+    confidence: route.confidence,
+    matched_terms: route.matched_terms,
+    recommendation_reason: route.recommendation_reason,
+    recommended_skill: route.recommended_skill,
+    fallback_skills: route.fallback_skills,
+    route_candidates: (route.route_candidates ?? []).map((candidate) => ({
+      skill: candidate.skill,
+      role: candidate.role,
+      selected: candidate.selected,
+      guard_allowed: candidate.guard_allowed,
+      guard_reasons: candidate.guard_reasons
+    })),
+    usage_disclosure: route.usage_disclosure ?? null,
+    guard_command: route.guard_command,
+    guard_allowed: route.guard?.allowed ?? null,
+    guard_reasons: route.guard?.reasons ?? [],
+    possible_skills: route.possible_skills.map((skill) => ({
+      id: skill.id,
+      category: skill.category,
+      allowed: skill.allowed
+    }))
+  };
+}
+
 function hasPolicyErrors(brief) {
   return (brief.health?.policy?.errors?.length ?? 0) > 0;
 }
@@ -114,6 +176,8 @@ function choicesFromActions(actions) {
   return actions.filter(confirmableAction).map((action) => ({
     label: action.label,
     action_id: action.id,
+    kind: action.kind,
+    applies_to: action.applies_to ?? null,
     risk: action.risk,
     requires_confirmation: action.requires_user_confirmation,
     effect: action.reason,

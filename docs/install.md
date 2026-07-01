@@ -6,33 +6,40 @@ bundles, and local skill repositories.
 After install, ask your AI questions like "what skills can you use in this
 project?" or "can you make this reviewed skill available for the current
 workflow?" The AI runs SkillBoard behind the scenes: it reads the current brief,
-uses one current action id only after confirmation, and runs the guard before
-actual skill use. You do not need to memorize the SkillBoard command loop.
+uses one current action id only after confirmation when policy would change, and
+runs the guard automatically before actual skill use. For already-allowed
+skills, the AI should tell you which skill it is about to use and which skill it
+used in the result instead of asking for another approval. That disclosure is an
+audit trace, not a permission prompt. You do not need to memorize the SkillBoard
+command loop.
 
 ## Install From npm
 
-Use npx when you want to bootstrap a project without keeping a global
-SkillBoard binary installed:
+Use no-prompt npx package execution when you want to bootstrap a project
+without keeping a global SkillBoard binary installed:
 
 AI/automation/operator details:
 
 ```bash
-npx agent-skillboard init
-npx agent-skillboard brief
-npx agent-skillboard doctor --summary
+npx --yes --package agent-skillboard skillboard init
+npx --yes --package agent-skillboard skillboard doctor --summary
+npx --yes --package agent-skillboard skillboard brief --workflow <workflow-from-init>
 ```
 
 SkillBoard does not make installed skills automatically callable. It imports
 trusted local skills as manual-only and keeps runtime/plugin skills quarantined
-until reviewed.
+until reviewed. When `init` creates or discovers workflows, use one of the
+workflow names it prints for the first brief. If `init` does not print a
+workflow, run the unscoped `brief` command it prints instead. The explicit
+package/binary spelling avoids an extra npx install prompt and keeps the
+executable name clear.
 
-In CI or scripts, use the explicit package/binary spelling:
+The equivalent `npm exec` spelling is also no-prompt and works well in scripts:
 
 ```bash
-npx --yes --package agent-skillboard skillboard init
-npx --yes --package agent-skillboard skillboard doctor --summary
 npm exec --yes --package agent-skillboard -- skillboard init
 npm exec --yes --package agent-skillboard -- skillboard doctor --summary
+npm exec --yes --package agent-skillboard -- skillboard brief --workflow <workflow-from-init>
 ```
 
 For repeated local use, install the CLI globally:
@@ -57,8 +64,8 @@ AI/automation/operator details:
 
 ```bash
 npx --yes --package github:NyXXiR/skillboard skillboard init
-npx --yes --package github:NyXXiR/skillboard skillboard brief
 npx --yes --package github:NyXXiR/skillboard skillboard doctor --summary
+npx --yes --package github:NyXXiR/skillboard skillboard brief --workflow <workflow-from-init>
 ```
 
 The equivalent `npm exec` spelling is explicit about the package and binary:
@@ -66,6 +73,7 @@ The equivalent `npm exec` spelling is explicit about the package and binary:
 ```bash
 npm exec --yes --package github:NyXXiR/skillboard -- skillboard init
 npm exec --yes --package github:NyXXiR/skillboard -- skillboard doctor --summary
+npm exec --yes --package github:NyXXiR/skillboard -- skillboard brief --workflow <workflow-from-init>
 ```
 
 ## Install From A Clone
@@ -79,8 +87,8 @@ git clone https://github.com/NyXXiR/skillboard.git
 cd skillboard
 npm install
 node bin/skillboard.mjs init --dir /path/to/your/project
-node bin/skillboard.mjs brief --dir /path/to/your/project
 node bin/skillboard.mjs doctor --dir /path/to/your/project --summary
+node bin/skillboard.mjs brief --dir /path/to/your/project --workflow <workflow-from-init>
 ```
 
 ## What init Does
@@ -143,7 +151,18 @@ briefs show action cards by default; JSON keeps them opt-in with
 keeps counts, top categories, the next safe action, short section previews, and
 short action summaries. Use `skillboard brief --verbose` when an operator needs
 the full list or full copyable command details. Agents should still run
-`skillboard guard use ...` immediately before an actual skill invocation.
+`skillboard guard use ...` immediately before an actual skill invocation. A
+passing guard is not a user prompt; the agent should disclose the selected skill
+at the start and completion, and ask only if the guard denies use or a
+policy-changing action is needed.
+
+When the user asks which skill fits a task, the bridge tells agents to use
+`skillboard brief --intent <request> --json`, read `assistant_guidance.route`,
+and use `recommended_skill`, `fallback_skills`, `route_candidates`, and
+`guard_command` instead of guessing from raw skill text. Inspect
+`route_candidates` when several skills match so denied candidates and selected
+fallbacks are clear. If no skill matches, the agent should ask a clarifying
+question before choosing a skill.
 
 Action cards are change suggestions. Before an agent applies one that changes
 policy, trust, hooks, reset state, or skill references, it should request user
@@ -166,20 +185,32 @@ system prompt for the managed project:
 
 ```text
 Use SkillBoard as the source of truth for agent skill availability.
-Before answering what skills can be used, run:
-skillboard brief --json --dir /path/to/your/project
+Use the workflow generated by init, such as `hermes-codex-local-manual`, or a
+workflow you explicitly created for that Hermes profile.
+
+Before answering what skills can be used in that workflow, run:
+skillboard brief --workflow <workflow-name> --json --include-actions --dir /path/to/your/project
+
+When the user asks which skill fits a task, run:
+skillboard brief --workflow <workflow-name> --intent <request> --json --dir /path/to/your/project
+Read assistant_guidance.route. Use recommended_skill, fallback_skills,
+route_candidates, and guard_command. Inspect route_candidates when several
+skills match so denied candidates and selected fallbacks are clear. If no skill
+matches, ask a clarifying question before choosing a skill.
 
 Do not infer availability from installed SKILL.md files. Immediately before
 invoking a skill, run:
 skillboard guard use <skill-id> --workflow <workflow-name> --dir /path/to/your/project
 
-For suggested policy changes, ask the user to approve one current action id,
-then run:
-skillboard apply-action <action-id> --dir /path/to/your/project --yes --json
-```
+If the guard allows an already-approved skill, do not ask the user for another
+approval. Say at the start: "I will use <skill-id> for this request." Say at
+completion: "I used <skill-id> for this request." Treat that disclosure as an
+audit trace, not a permission prompt.
 
-Use the workflow generated by init, such as `hermes-codex-local-manual`, or a
-workflow you explicitly created for that Hermes profile.
+For suggested policy changes, ask the user to approve one current action id from
+the `--include-actions` brief, then run:
+skillboard apply-action <action-id> --workflow <workflow-name> --dir /path/to/your/project --yes --json
+```
 
 After installing a new local agent skill pack, plugin, workflow bundle, or
 harness, rescan before enabling anything:

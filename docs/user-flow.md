@@ -6,10 +6,14 @@ plane internals.
 
 When you ask your AI "what skills can you use here?" or "make this reviewed
 skill available for this workflow," the AI should read the current brief, show
-the relevant choice, ask before applying one current action id, and run the
-final guard before invocation. You do not need to memorize the SkillBoard
-command loop. The command examples below are AI/automation/operator details for
-the agent, scripts, or people maintaining the setup.
+the relevant choice, ask only before applying one current action id when policy
+would change, and run the final guard automatically before invocation. For an
+already-allowed skill, the AI should state which skill it is about to use and
+which skill it used when reporting the result, not ask for another approval.
+That disclosure is an audit trace, not a permission prompt. You do not need to
+memorize the SkillBoard command loop. The command examples below are
+AI/automation/operator details for the agent, scripts, or people maintaining the
+setup.
 
 ## 1. Bootstrap The Control Plane
 
@@ -51,6 +55,29 @@ with `--workflow <name>` when a workflow is selected. The agent should read the
 returned post-apply brief before making the next availability claim.
 `apply-action` re-resolves the current brief and refuses stale action ids instead
 of replaying cached action-card shell text.
+
+When the user asks which skill fits a task, the agent can keep the same brief
+flow and include the user request as intent:
+
+```bash
+skillboard brief --intent "write tests before implementation" --workflow daily-workflow --config skillboard.config.yaml --skills skills --json
+```
+
+The returned `assistant_guidance.route` maps the request to a declared workflow
+capability or a workflow-bound skill metadata match, returns the recommended
+skill and fallbacks, and includes `match_source`, `matched_terms`,
+`recommendation_reason`, `route_candidates`, and the
+`skillboard guard use ...` command that still needs to pass immediately before
+invocation. `route_candidates` is the per-skill decision trace: it shows which
+matching skill was selected, which candidates were denied, and the guard reason
+when a preferred skill was skipped for an allowed fallback. Metadata matching can
+use declared skill id, path, category, and `SKILL.md` frontmatter
+name/description; it does not semantically rank raw skill bodies. If a
+recommended skill is already allowed, the agent should disclose it at the start
+and completion rather than ask for another approval. If no capability or
+workflow-bound skill matches, the agent should ask a clarifying question instead
+of guessing from raw `SKILL.md` text. Operators can still call
+`skillboard route ...` directly when they only need the recommendation payload.
 
 Run this again after installing agent packages, plugins, workflow bundles, or
 harnesses:
@@ -133,8 +160,11 @@ shows which workflows and required outputs would be affected before disabling or
 removing a skill.
 
 For an actual invocation, `brief` is not the final permission check. Agents
-should run `skillboard guard use ...` immediately before calling a skill so
-state changes made after the brief cannot slip through.
+should run `skillboard guard use ...` automatically immediately before calling a
+skill so state changes made after the brief cannot slip through. A passing guard
+does not require another user prompt; the agent should disclose the skill use at
+the start and in the final result. That disclosure is an audit trace, not a
+permission prompt.
 
 When wiring a guard hook from an action card, keep `apply-action` as the
 action-card primary flow:
@@ -144,7 +174,7 @@ skillboard apply-action <action-id> --workflow daily-workflow --config skillboar
 ```
 
 The raw hook commands are underlying manual operator detail for previewing and
-materializing an executable guard hook outside the action-card approval loop:
+materializing an executable guard hook outside the action-card control loop:
 
 ```bash
 skillboard hook install --workflow daily-workflow --config skillboard.config.yaml --skills skills --out .skillboard/hooks/daily-workflow-guard.sh --dry-run --json

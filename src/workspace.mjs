@@ -1,5 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
 import {
   readBoolean,
@@ -25,36 +26,102 @@ export async function loadWorkspace(options) {
   const config = requireRecord(parsed, "config root");
   const version = parseVersion(config.version);
   const skills = parseSkills(config.skills);
+  const installUnits = parseInstallUnits(config.install_units);
   return {
     version,
     defaults: parseDefaults(config.defaults),
-    installedSkills: await discoverInstalledSkills(options.skillsRoot, skills),
+    installedSkills: await discoverInstalledSkills(options.skillsRoot, skills, {
+      configPath: options.configPath,
+      env: options.env ?? process.env,
+      home: options.home,
+      installUnits
+    }),
     skills,
     capabilities: parseCapabilities(config.capabilities),
     harnesses: parseHarnesses(config.harnesses),
-    installUnits: parseInstallUnits(config.install_units),
+    installUnits,
     workflows: parseWorkflows(config.workflows)
   };
 }
 
-async function discoverInstalledSkills(skillsRoot, declaredSkills) {
-  if (skillsRoot === undefined) {
-    return [];
-  }
-  const skillFiles = await findSkillFiles(skillsRoot);
+async function discoverInstalledSkills(skillsRoot, declaredSkills, options = {}) {
   const installed = [];
-  for (const file of skillFiles) {
-    const frontmatter = parseSkillFrontmatter(await readFile(file, "utf8"));
-    const path = relative(skillsRoot, file).replaceAll("\\", "/").replace(/\/SKILL\.md$/, "");
-    const declared = declaredSkills.find((skill) => skill.path === path);
-    installed.push({
-      id: declared?.id ?? frontmatter.name ?? path,
+  const installedKeys = new Set();
+  if (skillsRoot !== undefined) {
+    const skillFiles = await findSkillFiles(skillsRoot);
+    for (const file of skillFiles) {
+      const frontmatter = parseSkillFrontmatter(await readFile(file, "utf8"));
+      const path = relative(skillsRoot, file).replaceAll("\\", "/").replace(/\/SKILL\.md$/, "");
+      const declared = declaredSkills.find((skill) => skill.path === path);
+      appendInstalledSkill(installed, installedKeys, {
+        id: declared?.id ?? frontmatter.name ?? path,
+        name: frontmatter.name,
+        description: frontmatter.description,
+        path
+      });
+    }
+  }
+  await appendInstallUnitSkillMetadata(installed, installedKeys, declaredSkills, options);
+  return installed.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function appendInstallUnitSkillMetadata(installed, installedKeys, declaredSkills, options) {
+  const units = new Map((options.installUnits ?? []).map((unit) => [unit.id, unit]));
+  for (const skill of declaredSkills) {
+    if (installedKeys.has(skill.id) || installedKeys.has(skill.path)) {
+      continue;
+    }
+    const unit = units.get(skill.ownerInstallUnit);
+    const root = resolveStoredPath(unit?.cachePath, options);
+    if (root === undefined) {
+      continue;
+    }
+    const frontmatter = await readOptionalSkillFrontmatter(join(root, skill.path, "SKILL.md"));
+    if (frontmatter === null) {
+      continue;
+    }
+    appendInstalledSkill(installed, installedKeys, {
+      id: skill.id,
       name: frontmatter.name,
       description: frontmatter.description,
-      path
+      path: skill.path
     });
   }
-  return installed.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function readOptionalSkillFrontmatter(file) {
+  const text = await readFile(file, "utf8").catch(() => null);
+  if (text === null) {
+    return null;
+  }
+  try {
+    return parseSkillFrontmatter(text);
+  } catch {
+    return null;
+  }
+}
+
+function appendInstalledSkill(installed, installedKeys, skill) {
+  installed.push(skill);
+  installedKeys.add(skill.id);
+  installedKeys.add(skill.path);
+}
+
+function resolveStoredPath(value, options) {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  const home = options.home ?? options.env?.HOME ?? options.env?.USERPROFILE ?? homedir();
+  if (value === "~") {
+    return home;
+  }
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return join(home, value.slice(2));
+  }
+  if (isAbsolute(value)) {
+    return value;
+  }
+  return resolve(dirname(options.configPath ?? "."), value);
 }
 
 async function findSkillFiles(root, seen = new Set()) {

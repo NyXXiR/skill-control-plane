@@ -166,6 +166,7 @@ function isHardReason(reason) {
   return normalized.includes("policy check failed")
     || normalized.includes("unknown skill")
     || normalized.includes("unknown workflow")
+    || normalized.includes("conflicts with active skill")
     || normalized.includes("blocks skill")
     || normalized.includes("source trust policy")
     || (normalized.includes("install unit") && normalized.includes("disabled"))

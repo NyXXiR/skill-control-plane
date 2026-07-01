@@ -15,6 +15,7 @@ import { detectInstallOutput } from "./install-output-detector.mjs";
 import { rolloutApply, rolloutAudit, rolloutPlan, rolloutReport, rolloutRollback } from "./rollout.mjs";
 import { reviewInstallUnit } from "./review.mjs";
 import { buildSkillBrief } from "./advisor.mjs";
+import { routeSkill } from "./route.mjs";
 import {
   activateSkill,
   addHarness,
@@ -83,6 +84,7 @@ export {
   rolloutPlan,
   rolloutReport,
   rolloutRollback,
+  routeSkill,
   renderImportFragment,
   renderReconcilePlan,
   uninstallProject,
