@@ -2,6 +2,12 @@
 
 SkillBoard separates storage from invocation.
 
+For product and AI-mediated development, read
+[`docs/ai-skill-routing-goal.md`](ai-skill-routing-goal.md) before changing
+routing, brief, bridge, policy, or workflow UX. The policy model should support
+a non-blocking flow where the AI routes and works first when safe, then asks
+afterward only when remembering a usage policy would reduce future ambiguity.
+
 ## Skill States
 
 - `installed`: discovered on disk from `SKILL.md`.

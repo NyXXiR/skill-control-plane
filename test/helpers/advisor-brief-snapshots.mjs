@@ -118,8 +118,20 @@ export const EXPECTED_INITIALIZED_CONTRACT = {
     full_reset: ["dryRun", "removed", "updated", "preserved"]
   },
   assistant_guidance: {
-    keys: ["status", "summary", "recommended_next_step", "choices", "guard"],
+    keys: ["status", "summary", "goal_document", "recommended_next_step", "choices", "guard"],
     status: "ready",
+    goal_document: {
+      keys: ["path", "purpose", "when_to_read"],
+      path: "docs/ai-skill-routing-goal.md",
+      purpose: "Preserve SkillBoard as a non-blocking AI skill routing control plane: route and work first when safe, explain briefly, ask after use when policy learning helps, and remember usage policy without rewriting skill bodies.",
+      when_to_read: [
+        "before changing routing",
+        "before changing brief output",
+        "before changing bridge instructions",
+        "before changing policy UX",
+        "before changing workflow UX"
+      ]
+    },
     choices: [],
     guard: {
       keys: ["required", "when", "command_hint", "allowed_use"],

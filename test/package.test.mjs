@@ -173,6 +173,8 @@ test("packed package drives fresh project through intent brief and guard", async
     assert.match(agentsBridge, /brief --intent <request>/i);
     assert.match(agentsBridge, /assistant_guidance\.route/);
     assert.match(agentsBridge, /route_candidates/);
+    assert.match(agentsBridge, /post_use_policy_suggestion/);
+    assert.match(agentsBridge, /ask after completion whether to remember the suggested policy/i);
     assert.match(agentsBridge, /I will use <skill-id> for this request\./);
     assert.match(agentsBridge, /I used <skill-id> for this request\./);
     assert.match(agentsBridge, /ask a clarifying question/i);

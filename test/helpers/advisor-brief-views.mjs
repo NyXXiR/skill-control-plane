@@ -97,6 +97,12 @@ function guidanceView(guidance) {
   return {
     keys: Object.keys(guidance),
     status: guidance.status,
+    goal_document: {
+      keys: Object.keys(guidance.goal_document),
+      path: guidance.goal_document.path,
+      purpose: guidance.goal_document.purpose,
+      when_to_read: guidance.goal_document.when_to_read
+    },
     choices: guidance.choices,
     guard: {
       keys: Object.keys(guidance.guard),

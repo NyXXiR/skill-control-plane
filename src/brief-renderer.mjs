@@ -110,6 +110,7 @@ function emitIntentRoute(lines, brief) {
       lines.push(`- Say before use: "${safeText(route.usage_disclosure.start_message)}"`);
       lines.push(`- Say after completion: "${safeText(route.usage_disclosure.finish_message)}"`);
     }
+    emitPostUsePolicySuggestion(lines, route.post_use_policy_suggestion);
   }
   lines.push("");
 }
@@ -124,6 +125,18 @@ function routeCandidateStatus(candidate) {
 
 function routeDisclosureText(skillLabel) {
   return `run the guard automatically, state at the start that ${skillLabel} is being used, and state at completion that it was used. No extra user approval is needed when the guard allows it.`;
+}
+
+function emitPostUsePolicySuggestion(lines, suggestion) {
+  if (suggestion === null || suggestion === undefined) {
+    return;
+  }
+  lines.push(`- After completion: ${safeText(afterUsePromptText(suggestion.question))}`);
+  lines.push(`- Policy command after confirmation: ${code(suggestion.suggested_policy.command_hint, Number.POSITIVE_INFINITY)}`);
+}
+
+function afterUsePromptText(question) {
+  return question.replace(/^Should I /u, "ask whether to ").replace(/\?$/u, ".");
 }
 
 function emitPolicyHealth(lines, brief) {

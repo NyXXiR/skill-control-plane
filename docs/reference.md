@@ -134,7 +134,9 @@ capability catalog. When nothing matches, the result keeps
 workflow skills so the AI can ask a clarifying question. When a guard allows the
 recommended skill, the AI should disclose the skill at start and completion
 instead of asking for another approval. That disclosure is an audit trace, not a
-permission prompt.
+permission prompt. When an allowed fallback is selected because the preferred
+skill is denied, `post_use_policy_suggestion` tells the AI to ask after the task
+whether to remember that fallback as the preferred workflow policy.
 
 ## Config Shape
 

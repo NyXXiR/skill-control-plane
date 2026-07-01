@@ -1,6 +1,17 @@
 import { command } from "./action-core.mjs";
 
 const GUARD_WHEN = "before invoking a skill";
+const GOAL_DOCUMENT = Object.freeze({
+  path: "docs/ai-skill-routing-goal.md",
+  purpose: "Preserve SkillBoard as a non-blocking AI skill routing control plane: route and work first when safe, explain briefly, ask after use when policy learning helps, and remember usage policy without rewriting skill bodies.",
+  when_to_read: Object.freeze([
+    "before changing routing",
+    "before changing brief output",
+    "before changing bridge instructions",
+    "before changing policy UX",
+    "before changing workflow UX"
+  ])
+});
 const GUARD_ALLOWED_USE = Object.freeze({
   confirmation_required: false,
   start: "State at the start which selected skill is being used for this request.",
@@ -17,6 +28,7 @@ export function buildAssistantGuidance(brief, options = {}) {
   const guidance = {
     status,
     summary: summaryForStatus(status, brief),
+    goal_document: goalDocument(),
     recommended_next_step: recommendedNextStep(status, brief, choices, route),
     choices,
     guard: {
@@ -30,6 +42,13 @@ export function buildAssistantGuidance(brief, options = {}) {
     guidance.route = route;
   }
   return guidance;
+}
+
+function goalDocument() {
+  return {
+    ...GOAL_DOCUMENT,
+    when_to_read: [...GOAL_DOCUMENT.when_to_read]
+  };
 }
 
 function guidanceStatus(brief) {
@@ -110,6 +129,9 @@ function recommendedNextStep(status, brief, choices, route = null) {
       }
       return "Run the guard check before invoking any selected skill.";
     case "needs-decision":
+      if (route?.recommended_skill !== null && route?.guard_allowed === true) {
+        return `Use ${route.recommended_skill} for this request after the guard check passes; handle pending review decisions after the task unless a policy-changing action is needed now.`;
+      }
       return firstChoice === undefined
         ? "Ask the user which pending review decision to make."
         : `Ask the user whether to approve: ${firstChoice.label}.`;
@@ -157,6 +179,7 @@ function routeGuidance(route) {
       guard_reasons: candidate.guard_reasons
     })),
     usage_disclosure: route.usage_disclosure ?? null,
+    post_use_policy_suggestion: route.post_use_policy_suggestion ?? null,
     guard_command: route.guard_command,
     guard_allowed: route.guard?.allowed ?? null,
     guard_reasons: route.guard?.reasons ?? [],

@@ -3,6 +3,8 @@ import { canUseSkill } from "./control/can-use-guard.mjs";
 
 const HIGH_CONFIDENCE = 4;
 const MEDIUM_CONFIDENCE = 2;
+const DEFAULT_CONFIG_PATH = "skillboard.config.yaml";
+const DEFAULT_SKILLS_ROOT = "skills";
 const ROUTE_STOP_WORDS = new Set([
   "a",
   "an",
@@ -70,6 +72,13 @@ export function routeSkill(workspace, options) {
   const fallbackSkills = routedSkills
     .filter((entry) => entry.guard.allowed && entry.skill !== recommended?.skill)
     .map((entry) => entry.skill);
+  const postUsePolicySuggestion = postUsePolicySuggestionForFallback({
+    matchedCapability: best.capability,
+    recommended,
+    routedSkills,
+    workflowName: workflow.name,
+    options
+  });
 
   return {
     ok: true,
@@ -93,6 +102,7 @@ export function routeSkill(workspace, options) {
     guard_command: recommended === null ? null : guardCommand(recommended.skill, workflow.name, options),
     guard: recommended?.guard ?? null,
     usage_disclosure: recommended?.guard.allowed === true ? usageDisclosure(recommended.skill) : null,
+    post_use_policy_suggestion: postUsePolicySuggestion,
     possible_skills: possibleWorkflowSkills(workspace, workflow),
     candidates
   };
@@ -115,6 +125,7 @@ function noRoute({ intent, workflow, candidates, skillCandidates, workspace }) {
     guard_command: null,
     guard: null,
     usage_disclosure: null,
+    post_use_policy_suggestion: null,
     possible_skills: possibleWorkflowSkills(workspace, workflow),
     candidates,
     skill_candidates: skillCandidates
@@ -156,6 +167,7 @@ function skillRoute({ intent, workflow, candidate, candidates, skillCandidates, 
     guard_command: guardCommand(candidate.skill_id, workflow.name, options),
     guard,
     usage_disclosure: guard.allowed ? usageDisclosure(candidate.skill_id) : null,
+    post_use_policy_suggestion: null,
     possible_skills: possibleWorkflowSkills(workspace, workflow),
     candidates,
     skill_candidates: skillCandidates
@@ -182,6 +194,36 @@ function usageDisclosure(skillId) {
     start_message: `I will use ${skillId} for this request.`,
     finish_message: `I used ${skillId} for this request.`,
     guard: "Run the guard automatically immediately before invocation. Ask the user only if the guard denies use or a policy-changing action is needed."
+  };
+}
+
+function postUsePolicySuggestionForFallback({ matchedCapability, recommended, routedSkills, workflowName, options }) {
+  if (recommended === null || recommended.role !== "fallback" || recommended.guard.allowed !== true) {
+    return null;
+  }
+  const preferred = routedSkills.find((entry) => entry.role === "preferred");
+  if (preferred === undefined || preferred.guard.allowed === true) {
+    return null;
+  }
+  return {
+    timing: "after_use",
+    mode: "ask_after_use",
+    reason: `SkillBoard selected fallback ${recommended.skill} because preferred skill ${preferred.skill} is denied. After completing the task, ask whether to remember ${recommended.skill} as the preferred skill for ${matchedCapability} in ${workflowName}.`,
+    question: `Should I remember ${recommended.skill} as the preferred skill for similar ${matchedCapability} requests in ${workflowName}?`,
+    requires_confirmation: true,
+    suggested_policy: {
+      kind: "prefer-skill",
+      skill: recommended.skill,
+      workflow: workflowName,
+      capability: matchedCapability,
+      command_hint: command([
+        "skillboard", "prefer", recommended.skill,
+        "--workflow", workflowName,
+        "--capability", matchedCapability,
+        "--config", routeConfigPath(options),
+        "--skills", routeSkillsRoot(options)
+      ]).display
+    }
   };
 }
 
@@ -375,9 +417,17 @@ function guardCommand(skillId, workflowName, options) {
   return command([
     "skillboard", "guard", "use", skillId,
     "--workflow", workflowName,
-    "--config", options.configPath,
-    "--skills", options.skillsRoot
+    "--config", routeConfigPath(options),
+    "--skills", routeSkillsRoot(options)
   ]).display;
+}
+
+function routeConfigPath(options) {
+  return options.configPath ?? DEFAULT_CONFIG_PATH;
+}
+
+function routeSkillsRoot(options) {
+  return options.skillsRoot ?? DEFAULT_SKILLS_ROOT;
 }
 
 function confidenceFor(score) {

@@ -158,11 +158,14 @@ policy-changing action is needed.
 
 When the user asks which skill fits a task, the bridge tells agents to use
 `skillboard brief --intent <request> --json`, read `assistant_guidance.route`,
-and use `recommended_skill`, `fallback_skills`, `route_candidates`, and
-`guard_command` instead of guessing from raw skill text. Inspect
+and use `recommended_skill`, `fallback_skills`, `route_candidates`,
+`post_use_policy_suggestion`, and `guard_command` instead of guessing from raw
+skill text. Inspect
 `route_candidates` when several skills match so denied candidates and selected
-fallbacks are clear. If no skill matches, the agent should ask a clarifying
-question before choosing a skill.
+fallbacks are clear. If `post_use_policy_suggestion` is present, the agent
+should use the allowed routed skill first, then ask after completion whether to
+remember the suggested policy. If no skill matches, the agent should ask a
+clarifying question before choosing a skill.
 
 Action cards are change suggestions. Before an agent applies one that changes
 policy, trust, hooks, reset state, or skill references, it should request user
@@ -194,9 +197,11 @@ skillboard brief --workflow <workflow-name> --json --include-actions --dir /path
 When the user asks which skill fits a task, run:
 skillboard brief --workflow <workflow-name> --intent <request> --json --dir /path/to/your/project
 Read assistant_guidance.route. Use recommended_skill, fallback_skills,
-route_candidates, and guard_command. Inspect route_candidates when several
-skills match so denied candidates and selected fallbacks are clear. If no skill
-matches, ask a clarifying question before choosing a skill.
+route_candidates, post_use_policy_suggestion, and guard_command. Inspect
+route_candidates when several skills match so denied candidates and selected
+fallbacks are clear. If post_use_policy_suggestion is present, use the allowed
+routed skill first, then ask after completion whether to remember the suggested
+policy. If no skill matches, ask a clarifying question before choosing a skill.
 
 Do not infer availability from installed SKILL.md files. Immediately before
 invoking a skill, run:

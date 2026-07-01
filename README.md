@@ -36,7 +36,10 @@ Names you may see in setup and logs:
 
 Use SkillBoard when your agent setup has grown beyond one trusted skill folder
 and you want workflow-scoped control without turning skill governance into a
-manual checklist.
+manual checklist. If you are changing routing, brief, bridge, policy, or
+workflow UX, read [AI Skill Routing Goal](docs/ai-skill-routing-goal.md) first;
+it defines the non-blocking `observe → route → work → explain briefly → ask
+after → remember policy` loop that development should preserve.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/NyXXiR/skillboard/main/skillboard.png" alt="SkillBoard architecture diagram: sources, inventory scanner, SkillBoard model, policy engine, and user and agent surfaces." width="100%">
@@ -150,6 +153,7 @@ fixtures, and assertions.
 
 ## Where To Go Next
 
+- [AI skill routing goal](docs/ai-skill-routing-goal.md)
 - [Install and bootstrap](docs/install.md)
 - [First-time control flow](docs/user-flow.md)
 - [Capability routing](docs/routing.md)

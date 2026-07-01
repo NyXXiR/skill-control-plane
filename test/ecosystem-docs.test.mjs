@@ -195,6 +195,27 @@ test("user docs frame commands as AI automation details, not a memorized user lo
   assert.doesNotMatch(combined, /run these commands every time you need a skill/i);
 });
 
+test("AI development docs preserve the non-blocking goal document", async () => {
+  const goal = await readFile(resolve("docs/ai-skill-routing-goal.md"), "utf8");
+  const readme = await readFile(resolve("README.md"), "utf8");
+  const userFlow = await readFile(resolve("docs/user-flow.md"), "utf8");
+  const policy = await readFile(resolve("docs/policy-model.md"), "utf8");
+  const bridge = await readFile(resolve("src/lifecycle-content.mjs"), "utf8");
+  const agents = await readFile(resolve("AGENTS.md"), "utf8");
+  const claude = await readFile(resolve("CLAUDE.md"), "utf8");
+  const combined = `${readme}\n${userFlow}\n${policy}\n${bridge}\n${agents}\n${claude}`;
+
+  assert.match(goal, /non-blocking AI skill routing control plane/i);
+  assert.match(goal, /observe\s*→\s*route\s*→\s*work\s*→\s*explain briefly\s*→\s*ask after\s*→\s*remember policy/i);
+  assert.match(goal, /SkillBoard does not rewrite `SKILL\.md` bodies/i);
+  for (const mode of ["always use", "prefer", "reference only", "ask after use", "ask before use", "avoid", "block"]) {
+    assert.match(goal, new RegExp(mode, "i"));
+  }
+  assert.match(goal, /MVP acceptance criteria/i);
+  assert.match(combined, /docs\/ai-skill-routing-goal\.md/);
+  assert.match(combined, /Read `docs\/ai-skill-routing-goal\.md` before changing routing, brief, bridge, policy, or workflow UX/i);
+});
+
 test("public docs explain read-only routing for choosing a skill", async () => {
   const readme = await readFile(resolve("README.md"), "utf8");
   const reference = await readFile(resolve("docs/reference.md"), "utf8");
@@ -235,7 +256,9 @@ test("README and install docs include a Hermes system prompt bridge guide", asyn
   assert.match(combined, /recommended_skill/);
   assert.match(combined, /fallback_skills/);
   assert.match(combined, /route_candidates/);
+  assert.match(combined, /post_use_policy_suggestion/);
   assert.match(combined, /guard_command/);
+  assert.match(combined, /ask after completion whether to\s+remember the suggested\s+policy/i);
   assert.match(combined, /ask a clarifying question before choosing a\s+skill/i);
   assert.match(combined, /skillboard guard use <skill-id> --workflow <workflow-name> --dir \/path\/to\/your\/project/);
   assert.match(combined, /skillboard apply-action <action-id> --workflow <workflow-name> --dir \/path\/to\/your\/project --yes --json/);
@@ -256,6 +279,8 @@ test("project dogfoods AGENTS.md and CLAUDE.md bridge files", async () => {
   assert.match(agents, /brief --intent <request>/i);
   assert.match(agents, /assistant_guidance\.route/);
   assert.match(agents, /route_candidates/);
+  assert.match(agents, /post_use_policy_suggestion/);
+  assert.match(agents, /ask after completion whether to remember the suggested policy/i);
   assert.match(agents, /I will use <skill-id> for this request\./);
   assert.match(agents, /I used <skill-id> for this request\./);
   assert.match(agents, /ask a clarifying question/i);
@@ -263,6 +288,8 @@ test("project dogfoods AGENTS.md and CLAUDE.md bridge files", async () => {
   assert.match(claude, /brief --intent <request>/i);
   assert.match(claude, /assistant_guidance\.route/);
   assert.match(claude, /route_candidates/);
+  assert.match(claude, /post_use_policy_suggestion/);
+  assert.match(claude, /ask after completion whether to remember the suggested policy/i);
   assert.match(claude, /I will use <skill-id> for this request\./);
   assert.match(claude, /I used <skill-id> for this request\./);
   assert.match(claude, /ask a clarifying question/i);

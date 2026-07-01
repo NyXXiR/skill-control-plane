@@ -15,6 +15,12 @@ memorize the SkillBoard command loop. The command examples below are
 AI/automation/operator details for the agent, scripts, or people maintaining the
 setup.
 
+Before changing this routing or workflow UX, read
+[`docs/ai-skill-routing-goal.md`](ai-skill-routing-goal.md). The goal is to keep
+SkillBoard non-blocking: observe the request, route to the current best skill,
+work normally, explain briefly, ask after use only when a policy preference would
+help, and remember that usage policy without rewriting skill bodies.
+
 ## 1. Bootstrap The Control Plane
 
 AI/automation/operator details:
@@ -66,11 +72,14 @@ skillboard brief --intent "write tests before implementation" --workflow daily-w
 The returned `assistant_guidance.route` maps the request to a declared workflow
 capability or a workflow-bound skill metadata match, returns the recommended
 skill and fallbacks, and includes `match_source`, `matched_terms`,
-`recommendation_reason`, `route_candidates`, and the
+`recommendation_reason`, `route_candidates`, `post_use_policy_suggestion`, and the
 `skillboard guard use ...` command that still needs to pass immediately before
 invocation. `route_candidates` is the per-skill decision trace: it shows which
 matching skill was selected, which candidates were denied, and the guard reason
-when a preferred skill was skipped for an allowed fallback. Metadata matching can
+when a preferred skill was skipped for an allowed fallback.
+`post_use_policy_suggestion` is the ask-after-use hook: if it is present, the
+agent should use the allowed routed skill first, then ask after completion
+whether to remember the suggested preference. Metadata matching can
 use declared skill id, path, category, and `SKILL.md` frontmatter
 name/description; it does not semantically rank raw skill bodies. If a
 recommended skill is already allowed, the agent should disclose it at the start

@@ -85,6 +85,9 @@ test("brief command intent json includes route-backed skill suggestion", async (
 
     assert.equal(result.code, 0);
     assert.equal(payload.assistant_guidance.status, "ready");
+    assert.equal(payload.assistant_guidance.goal_document.path, "docs/ai-skill-routing-goal.md");
+    assert.match(payload.assistant_guidance.goal_document.purpose, /non-blocking AI skill routing control plane/i);
+    assert.ok(payload.assistant_guidance.goal_document.when_to_read.includes("before changing routing"));
     assert.match(payload.assistant_guidance.recommended_next_step, /matt\.tdd/);
     assert.equal(payload.assistant_guidance.route.intent, "write tests before implementation");
     assert.equal(payload.assistant_guidance.route.matched_capability, "test-first-implementation");
@@ -120,6 +123,48 @@ test("brief command intent json includes route-backed skill suggestion", async (
     assert.equal(payload.assistant_guidance.route.usage_disclosure.finish_message, "I used matt.tdd for this request.");
     assert.equal(payload.assistant_guidance.route.guard_allowed, true);
     assert.match(payload.assistant_guidance.route.guard_command, /skillboard guard use matt\.tdd/);
+  });
+});
+
+test("brief command intent json asks after use when an allowed fallback is selected", async () => {
+  await withFallbackRouteFixture(async ({ configPath, skillsRoot }) => {
+    const result = await runCli([
+      "brief",
+      "--config",
+      configPath,
+      "--skills",
+      skillsRoot,
+      "--workflow",
+      "daily-workflow",
+      "--intent",
+      "write tests before implementation",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout);
+
+    assert.equal(result.code, 0);
+    assert.equal(payload.assistant_guidance.status, "needs-decision");
+    assert.equal(
+      payload.assistant_guidance.recommended_next_step,
+      "Use user.tdd for this request after the guard check passes; handle pending review decisions after the task unless a policy-changing action is needed now."
+    );
+    assert.equal(payload.assistant_guidance.route.recommended_skill, "user.tdd");
+    assert.equal(payload.assistant_guidance.route.route_candidates[0].guard_allowed, false);
+    assert.equal(payload.assistant_guidance.route.route_candidates[1].selected, true);
+    assert.deepEqual(payload.assistant_guidance.route.post_use_policy_suggestion, {
+      timing: "after_use",
+      mode: "ask_after_use",
+      reason: "SkillBoard selected fallback user.tdd because preferred skill vendor.test-first is denied. After completing the task, ask whether to remember user.tdd as the preferred skill for test-first-implementation in daily-workflow.",
+      question: "Should I remember user.tdd as the preferred skill for similar test-first-implementation requests in daily-workflow?",
+      requires_confirmation: true,
+      suggested_policy: {
+        kind: "prefer-skill",
+        skill: "user.tdd",
+        workflow: "daily-workflow",
+        capability: "test-first-implementation",
+        command_hint: `skillboard prefer user.tdd --workflow daily-workflow --capability test-first-implementation --config ${configPath} --skills ${skillsRoot}`
+      }
+    });
   });
 });
 
@@ -817,6 +862,91 @@ async function listProjectTree(root) {
   return (await readdir(root, { recursive: true })).map(String).sort();
 }
 
+async function withFallbackRouteFixture(run) {
+  const root = await mkdtemp(join(tmpdir(), "skillboard-brief-fallback-route-"));
+  try {
+    const configPath = join(root, "skillboard.config.yaml");
+    const skillsRoot = join(root, "skills");
+    await mkdir(join(skillsRoot, "vendor-test-first"), { recursive: true });
+    await mkdir(join(skillsRoot, "user-tdd"), { recursive: true });
+    await writeFile(
+      join(skillsRoot, "vendor-test-first", "SKILL.md"),
+      "---\nname: vendor-test-first\ndescription: Write tests before implementation.\n---\n# vendor-test-first\n",
+      "utf8"
+    );
+    await writeFile(
+      join(skillsRoot, "user-tdd", "SKILL.md"),
+      "---\nname: user-tdd\ndescription: Write tests before implementation with local project conventions.\n---\n# user-tdd\n",
+      "utf8"
+    );
+    await writeFile(configPath, fallbackRouteConfig(), "utf8");
+    return await run({ configPath, root, skillsRoot });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function fallbackRouteConfig() {
+  return `version: 1
+defaults:
+  invocation_policy: deny-by-default
+  allow_model_invocation: false
+  require_explicit_workflow: true
+skills:
+  vendor.test-first:
+    path: vendor-test-first
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: testing
+    owner_install_unit: vendor.skills
+  user.tdd:
+    path: user-tdd
+    status: active
+    invocation: manual-only
+    exposure: exported
+    category: testing
+capabilities:
+  test-first-implementation:
+    canonical: vendor.test-first
+    alternatives:
+      - user.tdd
+    default_policy: manual-only
+harnesses:
+  codex:
+    status: primary
+    workflows:
+      - daily-workflow
+workflows:
+  daily-workflow:
+    harness: codex
+    active_skills:
+      - vendor.test-first
+      - user.tdd
+    blocked_skills: []
+    required_capabilities:
+      test-first-implementation:
+        preferred: vendor.test-first
+        fallback:
+          - user.tdd
+        policy: manual-only
+install_units:
+  vendor.skills:
+    kind: marketplace
+    source: npx skills add vendor/test-first
+    scope: user-global
+    provided_components:
+      - skills
+    components:
+      skills:
+        - vendor.test-first
+    enabled: true
+    trust_level: unreviewed
+    permission_risk: medium
+    rollback: reinstall
+`;
+}
+
 async function withIntentRouteFixture(run) {
   const root = await mkdtemp(join(tmpdir(), "skillboard-brief-intent-route-"));
   try {
@@ -893,6 +1023,7 @@ function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choice
   assert.deepEqual(Object.keys(payload.assistant_guidance), [
     "status",
     "summary",
+    "goal_document",
     "recommended_next_step",
     "choices",
     "guard"
@@ -900,6 +1031,20 @@ function assertAssistantGuidance(payload, { status, hasWorkflowGuardHint, choice
   assert.equal(payload.assistant_guidance.status, status);
   assert.equal(typeof payload.assistant_guidance.summary, "string");
   assert.ok(payload.assistant_guidance.summary.length > 0);
+  assert.deepEqual(Object.keys(payload.assistant_guidance.goal_document), [
+    "path",
+    "purpose",
+    "when_to_read"
+  ]);
+  assert.equal(payload.assistant_guidance.goal_document.path, "docs/ai-skill-routing-goal.md");
+  assert.match(payload.assistant_guidance.goal_document.purpose, /non-blocking AI skill routing control plane/i);
+  assert.deepEqual(payload.assistant_guidance.goal_document.when_to_read, [
+    "before changing routing",
+    "before changing brief output",
+    "before changing bridge instructions",
+    "before changing policy UX",
+    "before changing workflow UX"
+  ]);
   assert.ok(
     payload.assistant_guidance.recommended_next_step === null
       || typeof payload.assistant_guidance.recommended_next_step === "string"

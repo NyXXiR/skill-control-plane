@@ -119,6 +119,9 @@ test("brief docs help teaches the disclosure-first control loop", async () => {
   assert.match(result.stdout, /do not ask for another approval/i);
   assert.match(result.stdout, /Translate a user's skill request into the current brief/i);
   assert.match(result.stdout, /current action id/i);
+  assert.match(result.stdout, /docs\/ai-skill-routing-goal\.md/);
+  assert.match(result.stdout, /non-blocking AI skill routing control plane/i);
+  assert.match(result.stdout, /observe → route → work → explain briefly → ask after → remember policy/i);
   assert.match(result.stdout, /one confirmation/i);
   assertApprovalLoop(result.stdout);
 });
@@ -241,7 +244,9 @@ function assertGeneratedBridgeIntentDriven(text) {
   assert.match(text, /recommended_skill/);
   assert.match(text, /fallback_skills/);
   assert.match(text, /route_candidates/);
+  assert.match(text, /post_use_policy_suggestion/);
   assert.match(text, /guard_command/);
+  assert.match(text, /ask after completion whether to\s+remember the suggested\s+policy/i);
   assert.match(text, /I will use <skill-id> for this request\./);
   assert.match(text, /I used <skill-id> for this request\./);
   assert.match(text, /ask a clarifying question/i);

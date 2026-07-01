@@ -25,6 +25,7 @@ Read `assistant_guidance.route` from the JSON output. It includes:
 - `recommended_skill`
 - `fallback_skills`
 - `route_candidates`
+- `post_use_policy_suggestion`
 - `guard_command`
 - `usage_disclosure`
 
@@ -41,6 +42,12 @@ When several skills match, inspect `route_candidates` before acting. Each entry
 shows the candidate skill, whether it was selected, whether the guard currently
 allows it, and the guard reason when it is denied. This is the field that tells
 an AI why a preferred skill was skipped and an allowed fallback was selected.
+
+When a preferred skill is denied but an allowed fallback is selected, SkillBoard
+may return `post_use_policy_suggestion`. The AI should keep the task moving with
+the allowed fallback, then ask after completion whether to remember the fallback
+as the preferred workflow policy. The suggested policy command is informational
+until the user confirms it.
 
 Use `route` directly when an automation layer only needs the recommendation
 payload:

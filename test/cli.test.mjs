@@ -278,6 +278,8 @@ test("cli init bootstraps config and agent bridge files", async () => {
     assert.match(agents, /recommended_skill/);
     assert.match(agents, /fallback_skills/);
     assert.match(agents, /route_candidates/);
+    assert.match(agents, /post_use_policy_suggestion/);
+    assert.match(agents, /ask after completion whether to remember the suggested policy/i);
     assert.match(agents, /guard_command/);
     assert.match(agents, /I will use <skill-id> for this request\./);
     assert.match(agents, /I used <skill-id> for this request\./);
@@ -301,6 +303,7 @@ test("cli init bootstraps config and agent bridge files", async () => {
     assert.match(claude, /brief --intent <request>/i);
     assert.match(claude, /assistant_guidance\.route/);
     assert.match(claude, /route_candidates/);
+    assert.match(claude, /post_use_policy_suggestion/);
     assert.match(profilesReadme, /source profiles/);
     assert.match(hooksReadme, /skillboard hook install/);
     assert.equal(agents.match(/BEGIN SKILLBOARD/g).length, 1);
@@ -2042,6 +2045,20 @@ test("cli route explains preferred denied fallback allowed decisions", async () 
     assert.equal(payload.recommended_skill, "user.tdd");
     assert.deepEqual(payload.fallback_skills, []);
     assert.equal(payload.guard.allowed, true);
+    assert.deepEqual(payload.post_use_policy_suggestion, {
+      timing: "after_use",
+      mode: "ask_after_use",
+      reason: "SkillBoard selected fallback user.tdd because preferred skill vendor.test-first is denied. After completing the task, ask whether to remember user.tdd as the preferred skill for test-first-implementation in daily-workflow.",
+      question: "Should I remember user.tdd as the preferred skill for similar test-first-implementation requests in daily-workflow?",
+      requires_confirmation: true,
+      suggested_policy: {
+        kind: "prefer-skill",
+        skill: "user.tdd",
+        workflow: "daily-workflow",
+        capability: "test-first-implementation",
+        command_hint: `skillboard prefer user.tdd --workflow daily-workflow --capability test-first-implementation --config ${configPath} --skills ${skillsRoot}`
+      }
+    });
     assert.deepEqual(payload.route_candidates.map((candidate) => ({
       skill: candidate.skill,
       role: candidate.role,
@@ -2078,6 +2095,8 @@ test("cli route explains preferred denied fallback allowed decisions", async () 
     assert.match(text.stdout, /Fallback skills: none/);
     assert.match(text.stdout, /vendor\.test-first .*preferred, denied/);
     assert.match(text.stdout, /user\.tdd .*fallback, selected, allowed/);
+    assert.match(text.stdout, /After completion: ask whether to remember user\.tdd as the preferred skill for similar test-first-implementation requests in daily-workflow\./);
+    assert.match(text.stdout, /Policy command after confirmation: skillboard prefer user\.tdd --workflow daily-workflow --capability test-first-implementation/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

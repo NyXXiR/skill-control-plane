@@ -1358,6 +1358,11 @@ function renderRoute(result) {
     lines.push(`Say before use: "${result.usage_disclosure.start_message}"`);
     lines.push(`Say after completion: "${result.usage_disclosure.finish_message}"`);
   }
+  if (result.post_use_policy_suggestion !== null && result.post_use_policy_suggestion !== undefined) {
+    const suggestion = result.post_use_policy_suggestion;
+    lines.push(`After completion: ${routeAfterUsePromptText(suggestion.question)}`);
+    lines.push(`Policy command after confirmation: ${suggestion.suggested_policy.command_hint}`);
+  }
   if (result.matched_capability === null) {
     lines.push("Possible skills:");
     for (const skill of result.possible_skills.slice(0, 5)) {
@@ -1374,6 +1379,10 @@ function routeCandidateStatus(candidate) {
     candidate.selected ? "selected" : null,
     candidate.guard_allowed ? "allowed" : "denied"
   ].filter((value) => value !== null).join(", ");
+}
+
+function routeAfterUsePromptText(question) {
+  return question.replace(/^Should I /u, "ask whether to ").replace(/\?$/u, ".");
 }
 
 function renderSourceAudit(result) {
@@ -1532,6 +1541,8 @@ function helpText() {
     "  impact disable <skill-id> --config <path> --skills <dir> [--out <path>] [--json]",
     "",
     "AI/automation control loop:",
+    "  Goal: preserve SkillBoard as a non-blocking AI skill routing control plane; see docs/ai-skill-routing-goal.md.",
+    "  Development loop: observe → route → work → explain briefly → ask after → remember policy.",
     "  For an already-allowed skill, disclose the selected skill at start and completion; do not ask for another approval.",
     "  Translate a user's skill request into the current brief: skillboard brief --json --config <path> --skills <dir> [--workflow <name>] [--intent <request>] [--include-actions].",
     "  If a policy-changing action is needed, pick one current action id from that brief and ask the user for one confirmation.",
